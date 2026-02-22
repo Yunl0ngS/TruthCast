@@ -1,0 +1,38 @@
+﻿[
+  {
+    "id": "kb-001",
+    "title": "Official statement on infection-rate bulletin and public communication",
+    "source": "Health Ministry",
+    "url": "https://example.com/health-bulletin",
+    "published_at": "2023-10-01",
+    "summary": "The infection rate is stable. No new outbreak reported.",
+    "tags": ["health", "infection", "bulletin"],
+    "domains": ["health"],
+    "stance_hint": "refute",
+    "credibility": 0.95
+  },
+  {
+    "id": "kb-002",
+    "title": "关于某地发生重大安全事故的辟谣通报",
+    "source": "公安部网安局",
+    "url": "https://example.com/security-rumor",
+    "published_at": "2023-11-15",
+    "summary": "网传某地发生重大安全事故为不实信息，系旧闻翻炒。",
+    "tags": ["安全", "辟谣", "旧闻"],
+    "domains": ["security", "media"],
+    "stance_hint": "refute",
+    "credibility": 0.98
+  },
+  {
+    "id": "kb-003",
+    "title": "教育局关于某学校停课的说明",
+    "source": "教育局",
+    "url": "https://example.com/education-notice",
+    "published_at": "2023-12-01",
+    "summary": "某学校因天气原因停课一天，并非网传的传染病爆发。",
+    "tags": ["教育", "停课", "辟谣"],
+    "domains": ["education"],
+    "stance_hint": "refute",
+    "credibility": 0.90
+  }
+]

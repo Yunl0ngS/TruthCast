@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Build / dist
+build/
+dist/
+
+# Frontend (Vite / React)
+web/node_modules/
+web/dist/
+web/.vite/
+
+# Local runtime data
+data/history/
+
+debug/
+
+my_docs/
+
+AGENTS.md
+GEMINI.md
