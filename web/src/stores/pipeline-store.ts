@@ -15,16 +15,24 @@ import type {
 } from '@/types';
 import {
   alignEvidence,
+  alignEvidenceWithSignal,
   detect,
+  detectWithSignal,
   detectClaims,
+  detectClaimsWithSignal,
   detectEvidence,
+  detectEvidenceWithSignal,
   detectReport,
+  detectReportWithSignal,
   simulateStream,
+  loadLatestPipelineState,
+  savePipelinePhaseSnapshot,
   updateHistorySimulation,
 } from '@/services/api';
 import type { SimulationStreamEvent } from '@/services/api';
 
 interface PipelineState {
+  taskId: string | null;
   text: string;
   error: string | null;
   detectData: DetectResponse | null;
@@ -37,6 +45,7 @@ interface PipelineState {
   // 内容生成允许"逐步生成"，因此使用 ContentDraft 保存阶段性结果
   content: ContentDraft | null;
   phases: PhaseState;
+  abortController: AbortController | null;
   isFromHistory: boolean;
   recordId: string | null;
   
@@ -44,7 +53,9 @@ interface PipelineState {
   setPhase: (phase: Phase, status: PhaseStatus) => void;
   setError: (error: string | null) => void;
   setContent: (content: ContentDraft | null) => void;
+  hydrateFromLatest: () => Promise<void>;
   runPipeline: () => Promise<void>;
+  interruptPipeline: () => void;
   retryPhase: (phase: Phase) => Promise<void>;
   retryFailed: () => Promise<void>;
   loadFromHistory: (detail: HistoryDetail, simulation?: SimulateResponse | null) => void;
@@ -61,6 +72,7 @@ const INIT_PHASE_STATE: PhaseState = {
 };
 
 const initialState = {
+  taskId: null as string | null,
   text: '网传某事件"100%真实且必须立刻转发"，消息来源为内部人士，请快速核查其真实性风险。',
   error: null,
   detectData: null as DetectResponse | null,
@@ -72,9 +84,81 @@ const initialState = {
   simulation: null as SimulateResponse | null,
   content: null as ContentDraft | null,
   phases: INIT_PHASE_STATE,
+  abortController: null as AbortController | null,
   isFromHistory: false,
   recordId: null as string | null,
 };
+
+function _makeTaskId(): string {
+  try {
+    // 浏览器环境优先
+    return crypto.randomUUID();
+  } catch {
+    // 兜底：时间戳 + 随机
+    return `task_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  }
+}
+
+function _phasePayload(get: () => PipelineState, phase: Phase): Record<string, unknown> | null {
+  const s = get();
+  switch (phase) {
+    case 'detect':
+      return {
+        detectData: s.detectData,
+        strategy: s.strategy,
+      };
+    case 'claims':
+      return { claims: s.claims };
+    case 'evidence':
+      return {
+        rawEvidences: s.rawEvidences,
+        evidences: s.evidences,
+      };
+    case 'report':
+      return {
+        report: s.report,
+        recordId: s.recordId,
+      };
+    case 'simulation':
+      return { simulation: s.simulation };
+    case 'content':
+      return { content: s.content };
+  }
+}
+
+async function _persistPhaseSnapshot(
+  get: () => PipelineState,
+  phase: Phase,
+  status: PhaseStatus,
+  opts?: {
+    duration_ms?: number | null;
+    error_message?: string | null;
+    payload?: Record<string, unknown> | null;
+  }
+): Promise<void> {
+  const s = get();
+  const taskId = s.taskId;
+  if (!taskId) return;
+
+  try {
+    await savePipelinePhaseSnapshot({
+      task_id: taskId,
+      input_text: s.text,
+      phases: s.phases,
+      phase,
+      status,
+      duration_ms: opts?.duration_ms ?? null,
+      error_message: opts?.error_message ?? null,
+      payload: opts?.payload ?? _phasePayload(get, phase),
+      meta: {
+        recordId: s.recordId,
+      },
+    });
+  } catch (err) {
+    // 持久化失败不应阻塞用户流程
+    console.warn('[pipeline persistence] save-phase failed:', err);
+  }
+}
 
 export const usePipelineStore = create<PipelineState>((set, get) => ({
   ...initialState,
@@ -90,12 +174,112 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
 
   setContent: (content) => set({ content }),
 
+  hydrateFromLatest: async () => {
+    // 若当前已经有进行中的 task（非全 idle），不要覆盖
+    const current = get();
+    const hasProgress =
+      current.taskId ||
+      current.detectData ||
+      current.claims.length > 0 ||
+      current.evidences.length > 0 ||
+      current.report ||
+      current.simulation ||
+      current.content ||
+      Object.values(current.phases).some((v) => v !== 'idle');
+    if (hasProgress) return;
+
+    try {
+      const latest = await loadLatestPipelineState();
+      if (!latest.task_id || !latest.updated_at) return;
+
+      // 后端没有任何快照时 phases 可能全 idle；这种情况不覆盖
+      const hasAnySnapshot = (latest.snapshots ?? []).length > 0;
+      if (!hasAnySnapshot) return;
+
+      const next: Partial<PipelineState> = {
+        taskId: latest.task_id,
+        text: latest.input_text || current.text,
+        phases: latest.phases,
+        error: null,
+        isFromHistory: false,
+      };
+
+      for (const snap of latest.snapshots ?? []) {
+        const payload = (snap.payload ?? {}) as any;
+        switch (snap.phase) {
+          case 'detect':
+            if (payload.detectData) next.detectData = payload.detectData as DetectResponse;
+            if (payload.strategy) next.strategy = payload.strategy as StrategyConfig;
+            break;
+          case 'claims':
+            if (Array.isArray(payload.claims)) next.claims = payload.claims as ClaimItem[];
+            break;
+          case 'evidence':
+            if (Array.isArray(payload.rawEvidences)) next.rawEvidences = payload.rawEvidences as EvidenceItem[];
+            if (Array.isArray(payload.evidences)) next.evidences = payload.evidences as EvidenceItem[];
+            break;
+          case 'report':
+            if (payload.report) next.report = payload.report as ReportResponse;
+            if (typeof payload.recordId === 'string') next.recordId = payload.recordId as string;
+            break;
+          case 'simulation':
+            if (payload.simulation) next.simulation = payload.simulation as SimulateResponse;
+            break;
+          case 'content':
+            if (payload.content) next.content = payload.content as ContentDraft;
+            break;
+        }
+      }
+
+      set(next as any);
+      toast.success('已从数据库恢复上一次分析进度');
+    } catch (err) {
+      console.warn('[pipeline persistence] load-latest failed:', err);
+    }
+  },
+
   reset: () => set(initialState),
+
+  interruptPipeline: () => {
+    const c = get().abortController;
+    if (c && !c.signal.aborted) {
+      c.abort();
+      // 立即把当前 running 的阶段标记为 canceled，保证 UI 立刻出现“可继续/可重试”入口
+      const runningPhases: Phase[] = [];
+      set((state) => {
+        const next = { ...state.phases };
+        (Object.keys(next) as Phase[]).forEach((p) => {
+          if (next[p] === 'running') {
+            next[p] = 'canceled';
+            runningPhases.push(p);
+          }
+        });
+        return {
+          phases: next,
+          abortController: null,
+        };
+      });
+
+      // 中断也要落库（running -> canceled）
+      for (const p of runningPhases) {
+        void _persistPhaseSnapshot(get, p, 'canceled', {
+          error_message: 'aborted',
+        });
+      }
+      toast.info('已请求中断分析');
+    }
+  },
 
   runPipeline: async () => {
     const { text, setPhase, setError } = get();
+
+    // 每次启动分析都生成新的 AbortController
+    const controller = new AbortController();
+    const signal = controller.signal;
     
+    const taskId = _makeTaskId();
     set({
+      taskId,
       error: null,
       detectData: null,
       strategy: null,
@@ -107,8 +291,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       content: null,
       phases: INIT_PHASE_STATE,
       recordId: null,
+      abortController: controller,
       // 从历史记录回放后再发起新的分析时，必须重置该标记；否则会导致后续写回历史（content/simulation 等）被误拦截
       isFromHistory: false,
+    });
+
+    // 初始化时也写一次（方便刷新后至少能恢复“任务已开始”）
+    void _persistPhaseSnapshot(get, 'detect', 'idle', {
+      payload: { note: 'task_started' },
     });
 
     toast.info('开始分析...');
@@ -120,18 +310,40 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       }
     };
 
+    const isAbortError = (err: unknown) => {
+      const e = err as any;
+      return (
+        e?.name === 'AbortError' ||
+        e?.code === 'ERR_CANCELED' ||
+        String(e?.message ?? '').toLowerCase().includes('canceled') ||
+        String(e?.message ?? '').toLowerCase().includes('aborted')
+      );
+    };
+
     setPhase('detect', 'running');
-    const detectPromise = detect(text)
+    void _persistPhaseSnapshot(get, 'detect', 'running');
+    const detectPromise = detectWithSignal(text, signal)
       .then((result) => {
         set({ detectData: result, strategy: result.strategy ?? null });
         setPhase('detect', 'done');
+        void _persistPhaseSnapshot(get, 'detect', 'done');
         toast.success('风险快照完成');
         if (result.truncated) {
           toast.warning('输入文本较长，已自动截断至 8000 字符以内进行分析');
         }
       })
       .catch((err) => {
+        if (isAbortError(err)) {
+          setPhase('detect', 'canceled');
+          void _persistPhaseSnapshot(get, 'detect', 'canceled', {
+            error_message: 'aborted',
+          });
+          return;
+        }
         setPhase('detect', 'failed');
+        void _persistPhaseSnapshot(get, 'detect', 'failed', {
+          error_message: err instanceof Error ? err.message : '未知错误',
+        });
         pushError(`风险快照失败：${err instanceof Error ? err.message : '未知错误'}`);
       });
 
@@ -142,35 +354,61 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       
       try {
         setPhase('claims', 'running');
-        const claimsResult = await detectClaims(text, currentStrategy);
+        void _persistPhaseSnapshot(get, 'claims', 'running');
+        if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+        const claimsResult = await detectClaimsWithSignal(text, currentStrategy, signal);
         set({ claims: claimsResult });
         setPhase('claims', 'done');
+        void _persistPhaseSnapshot(get, 'claims', 'done');
         toast.success(`主张抽取完成，共 ${claimsResult.length} 条`);
 
         setPhase('evidence', 'running');
+        void _persistPhaseSnapshot(get, 'evidence', 'running');
         let evidenceResult: EvidenceItem[] = [];
         try {
           // Step 1: 证据检索
-          const rawEvidences = await detectEvidence(text, claimsResult, currentStrategy);
+          if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+          const rawEvidences = await detectEvidenceWithSignal(text, claimsResult, currentStrategy, signal);
           set({ rawEvidences });
           toast.success(`证据检索完成，共 ${rawEvidences.length} 条`);
           
           // Step 2: 证据聚合与对齐
-          evidenceResult = await alignEvidence(claimsResult, rawEvidences, currentStrategy);
+          if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+          evidenceResult = await alignEvidenceWithSignal(claimsResult, rawEvidences, currentStrategy, signal);
           set({ evidences: evidenceResult });
           setPhase('evidence', 'done');
+          void _persistPhaseSnapshot(get, 'evidence', 'done');
           toast.success(`证据聚合对齐完成，共 ${evidenceResult.length} 条`);
         } catch (err) {
-          setPhase('evidence', 'failed');
-          pushError(`证据处理失败：${err instanceof Error ? err.message : '未知错误'}`);
+          if (isAbortError(err)) {
+            setPhase('evidence', 'canceled');
+            void _persistPhaseSnapshot(get, 'evidence', 'canceled', {
+              error_message: 'aborted',
+            });
+          } else {
+            setPhase('evidence', 'failed');
+            void _persistPhaseSnapshot(get, 'evidence', 'failed', {
+              error_message: err instanceof Error ? err.message : '未知错误',
+            });
+            pushError(`证据处理失败：${err instanceof Error ? err.message : '未知错误'}`);
+          }
         }
 
         let reportResult: ReportResponse | null = null;
         let recordId: string | null = null;
         setPhase('report', 'running');
+        void _persistPhaseSnapshot(get, 'report', 'running');
         try {
+          if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
           const currentDetectData = get().detectData;
-          const reportResponse = await detectReport(text, claimsResult, evidenceResult, currentDetectData, currentStrategy);
+          const reportResponse = await detectReportWithSignal(
+            text,
+            claimsResult,
+            evidenceResult,
+            currentDetectData,
+            currentStrategy,
+            signal
+          );
           recordId = reportResponse.record_id;
           reportResult = {
             risk_score: reportResponse.risk_score,
@@ -184,13 +422,25 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
           };
           set({ report: reportResult, recordId });
           setPhase('report', 'done');
+          void _persistPhaseSnapshot(get, 'report', 'done');
           toast.success('综合报告生成完成');
         } catch (err) {
-          setPhase('report', 'failed');
-          pushError(`综合报告失败：${err instanceof Error ? err.message : '未知错误'}`);
+          if (isAbortError(err)) {
+            setPhase('report', 'canceled');
+            void _persistPhaseSnapshot(get, 'report', 'canceled', {
+              error_message: 'aborted',
+            });
+          } else {
+            setPhase('report', 'failed');
+            void _persistPhaseSnapshot(get, 'report', 'failed', {
+              error_message: err instanceof Error ? err.message : '未知错误',
+            });
+            pushError(`综合报告失败：${err instanceof Error ? err.message : '未知错误'}`);
+          }
         }
 
         setPhase('simulation', 'running');
+        void _persistPhaseSnapshot(get, 'simulation', 'running');
         try {
           await simulateStream(
             text,
@@ -212,6 +462,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
 
               console.log('[Simulation Stream] Updated simulation:', updatedSimulation);
               set({ simulation: updatedSimulation });
+              // 流式阶段中也允许增量落库（避免刷新丢阶段产物）
+              void _persistPhaseSnapshot(get, 'simulation', 'running');
 
               const stageMessages: Record<string, string> = {
                 emotion: '情绪与立场分析完成',
@@ -223,9 +475,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
             },
             claimsResult,
             evidenceResult,
-            reportResult ?? undefined
+            reportResult ?? undefined,
+            signal
           );
           setPhase('simulation', 'done');
+          void _persistPhaseSnapshot(get, 'simulation', 'done');
           toast.success('舆情预演完成');
           
           const finalSimulation = get().simulation;
@@ -239,19 +493,46 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
           
           toast.success('分析完成');
         } catch (err) {
-          setPhase('simulation', 'failed');
-          pushError(`舆情预演失败：${err instanceof Error ? err.message : '未知错误'}`);
+          if (isAbortError(err)) {
+            setPhase('simulation', 'canceled');
+            void _persistPhaseSnapshot(get, 'simulation', 'canceled', {
+              error_message: 'aborted',
+            });
+          } else {
+            setPhase('simulation', 'failed');
+            void _persistPhaseSnapshot(get, 'simulation', 'failed', {
+              error_message: err instanceof Error ? err.message : '未知错误',
+            });
+            pushError(`舆情预演失败：${err instanceof Error ? err.message : '未知错误'}`);
+          }
         }
       } catch (err) {
-        setPhase('claims', 'failed');
-        setPhase('evidence', 'idle');
-        setPhase('report', 'idle');
-        setPhase('simulation', 'idle');
-        pushError(`主张抽取失败：${err instanceof Error ? err.message : '未知错误'}`);
+        if (isAbortError(err)) {
+          setPhase('claims', 'canceled');
+          void _persistPhaseSnapshot(get, 'claims', 'canceled', {
+            error_message: 'aborted',
+          });
+          // 下游阶段保持 idle（未开始），但 UI 允许“继续执行”
+          setPhase('evidence', 'idle');
+          setPhase('report', 'idle');
+          setPhase('simulation', 'idle');
+        } else {
+          setPhase('claims', 'failed');
+          void _persistPhaseSnapshot(get, 'claims', 'failed', {
+            error_message: err instanceof Error ? err.message : '未知错误',
+          });
+          setPhase('evidence', 'idle');
+          setPhase('report', 'idle');
+          setPhase('simulation', 'idle');
+          pushError(`主张抽取失败：${err instanceof Error ? err.message : '未知错误'}`);
+        }
       }
     })();
 
     await Promise.allSettled([detectPromise, deepScanPromise]);
+
+    // 清理 controller，避免下次误用
+    set({ abortController: null });
   },
 
   loadFromHistory: (detail: HistoryDetail, simulation?: SimulateResponse | null) => {
@@ -314,6 +595,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
 
     toast.info(`正在重试 ${phaseNames[phase]}...`);
     setPhase(phase, 'running');
+    void _persistPhaseSnapshot(get, phase, 'running');
     setError(null);
 
     try {
@@ -322,6 +604,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
           const detectResult = await detect(text);
           set({ detectData: detectResult, strategy: detectResult.strategy ?? null });
           setPhase('detect', 'done');
+          void _persistPhaseSnapshot(get, 'detect', 'done');
           toast.success('风险快照重试成功');
           break;
 
@@ -330,6 +613,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
           const claimsResult = await detectClaims(text, currentStrategy);
           set({ claims: claimsResult });
           setPhase('claims', 'done');
+          void _persistPhaseSnapshot(get, 'claims', 'done');
           toast.success(`主张抽取重试成功，共 ${claimsResult.length} 条`);
           break;
 
@@ -345,6 +629,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
           const alignedEvidences = await alignEvidence(evClaims, rawEvidences, evStrategy);
           set({ evidences: alignedEvidences });
           setPhase('evidence', 'done');
+          void _persistPhaseSnapshot(get, 'evidence', 'done');
           toast.success(`证据聚合对齐完成，共 ${alignedEvidences.length} 条`);
           break;
 
@@ -367,6 +652,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
           };
           set({ report: reportResult, recordId: newRecordId });
           setPhase('report', 'done');
+          void _persistPhaseSnapshot(get, 'report', 'done');
           toast.success('综合报告重试成功');
           break;
 
@@ -394,6 +680,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
               } as SimulateResponse;
 
               set({ simulation: updatedSimulation });
+              void _persistPhaseSnapshot(get, 'simulation', 'running');
 
               const stageMessages: Record<string, string> = {
                 emotion: '情绪与立场分析完成',
@@ -408,6 +695,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
             simReport ?? undefined
           );
           setPhase('simulation', 'done');
+          void _persistPhaseSnapshot(get, 'simulation', 'done');
           toast.success('舆情预演重试成功');
           
           const retryRecordId = get().recordId;
@@ -423,6 +711,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       }
     } catch (err) {
       setPhase(phase, 'failed');
+      void _persistPhaseSnapshot(get, phase, 'failed', {
+        error_message: err instanceof Error ? err.message : '未知错误',
+      });
       const errorMsg = `${phaseNames[phase]}重试失败：${err instanceof Error ? err.message : '未知错误'}`;
       setError(errorMsg);
       toast.error(errorMsg);

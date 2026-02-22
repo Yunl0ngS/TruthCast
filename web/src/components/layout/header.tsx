@@ -4,7 +4,16 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { FileSearch, History, LineChart, Home, Menu, X, FileText } from 'lucide-react';
+import {
+  FileSearch,
+  History,
+  LineChart,
+  Home,
+  Menu,
+  X,
+  FileText,
+  MessageSquare,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Sheet,
@@ -14,6 +23,7 @@ import {
 } from '@/components/ui/sheet';
 
 const navItems = [
+  { href: '/chat', label: '对话工作台', icon: MessageSquare },
   { href: '/', label: '任务输入', icon: Home },
   { href: '/result', label: '检测结果', icon: FileSearch },
   { href: '/simulation', label: '舆情预演', icon: LineChart },

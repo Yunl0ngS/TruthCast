@@ -72,6 +72,7 @@ export default function ContentPage() {
     phases,
     setPhase,
     retryPhase,
+    interruptPipeline,
     recordId,
     isFromHistory,
   } = usePipelineStore();
@@ -403,7 +404,14 @@ export default function ContentPage() {
     <div className="space-y-6">
       {/* 进度时间线 */}
       <div className="flex flex-col items-center gap-4">
-        <ProgressTimeline phases={phases} onRetry={handleRetry} showRetry={true} />
+        <ProgressTimeline
+          phases={phases}
+          onRetry={handleRetry}
+          onAbort={interruptPipeline}
+          showRetry={true}
+          mobileMode="collapsible"
+          rememberExpandedKey="timeline_content"
+        />
 
         {hasReport && (
           <ExportButton

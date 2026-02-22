@@ -47,5 +47,7 @@ my_docs/
 
 my_plans/
 
+.kilocode/
+
 AGENTS.md
 GEMINI.md

@@ -8,7 +8,19 @@ import type { Phase } from '@/types';
 import { CheckCircle2 } from 'lucide-react';
 
 export default function ResultPage() {
-  const { text, detectData, claims, rawEvidences, evidences, report, simulation, content, phases, retryPhase } = usePipelineStore();
+  const {
+    text,
+    detectData,
+    claims,
+    rawEvidences,
+    evidences,
+    report,
+    simulation,
+    content,
+    phases,
+    retryPhase,
+    interruptPipeline,
+  } = usePipelineStore();
 
   const hasReport = report !== null;
   const allDone =
@@ -28,7 +40,10 @@ export default function ResultPage() {
         <ProgressTimeline
           phases={phases}
           onRetry={handleRetry}
+          onAbort={interruptPipeline}
           showRetry={true}
+          mobileMode="collapsible"
+          rememberExpandedKey="timeline_result"
         />
         {hasReport && (
           <ExportButton

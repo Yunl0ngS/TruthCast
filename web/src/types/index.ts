@@ -133,7 +133,7 @@ export type HistoryDetail = {
 };
 
 export type Phase = 'detect' | 'claims' | 'evidence' | 'report' | 'simulation' | 'content';
-export type PhaseStatus = 'idle' | 'running' | 'done' | 'failed';
+export type PhaseStatus = 'idle' | 'running' | 'done' | 'failed' | 'canceled';
 export type PhaseState = Record<Phase, PhaseStatus>;
 
 // ========== 应对内容生成类型 ==========

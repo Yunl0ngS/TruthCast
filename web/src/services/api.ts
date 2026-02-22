@@ -6,6 +6,9 @@ import type {
   ContentDraft,
   DetectResponse,
   EvidenceItem,
+  Phase,
+  PhaseState,
+  PhaseStatus,
   HistoryDetail,
   HistoryItem,
   ReportResponse,
@@ -25,8 +28,22 @@ export async function detect(text: string): Promise<DetectResponse> {
   return data;
 }
 
+export async function detectWithSignal(text: string, signal?: AbortSignal): Promise<DetectResponse> {
+  const { data } = await api.post<DetectResponse>('/detect', { text }, { signal });
+  return data;
+}
+
 export async function detectClaims(text: string, strategy?: StrategyConfig | null): Promise<ClaimItem[]> {
   const { data } = await api.post<{ claims: ClaimItem[] }>('/detect/claims', { text, strategy });
+  return data.claims;
+}
+
+export async function detectClaimsWithSignal(
+  text: string,
+  strategy?: StrategyConfig | null,
+  signal?: AbortSignal
+): Promise<ClaimItem[]> {
+  const { data } = await api.post<{ claims: ClaimItem[] }>('/detect/claims', { text, strategy }, { signal });
   return data.claims;
 }
 
@@ -40,6 +57,24 @@ export async function detectEvidence(
     claims,
     strategy,
   });
+  return data.evidences;
+}
+
+export async function detectEvidenceWithSignal(
+  text: string,
+  claims: ClaimItem[],
+  strategy?: StrategyConfig | null,
+  signal?: AbortSignal
+): Promise<EvidenceItem[]> {
+  const { data } = await api.post<{ evidences: EvidenceItem[] }>(
+    '/detect/evidence',
+    {
+      text,
+      claims,
+      strategy,
+    },
+    { signal }
+  );
   return data.evidences;
 }
 
@@ -73,6 +108,24 @@ export async function alignEvidence(
   return data.evidences;
 }
 
+export async function alignEvidenceWithSignal(
+  claims: ClaimItem[],
+  evidences: EvidenceItem[],
+  strategy?: StrategyConfig | null,
+  signal?: AbortSignal
+): Promise<EvidenceItem[]> {
+  const { data } = await api.post<{ evidences: EvidenceItem[] }>(
+    '/detect/evidence/align',
+    {
+      claims,
+      evidences,
+      strategy,
+    },
+    { signal }
+  );
+  return data.evidences;
+}
+
 export async function detectReport(
   text: string,
   claims?: ClaimItem[],
@@ -87,6 +140,28 @@ export async function detectReport(
     detect_data: detectData,
     strategy,
   });
+  return data;
+}
+
+export async function detectReportWithSignal(
+  text: string,
+  claims?: ClaimItem[],
+  evidences?: EvidenceItem[],
+  detectData?: DetectResponse | null,
+  strategy?: StrategyConfig | null,
+  signal?: AbortSignal
+): Promise<DetectReportResult> {
+  const { data } = await api.post<DetectReportResult>(
+    '/detect/report',
+    {
+      text,
+      claims,
+      evidences,
+      detect_data: detectData,
+      strategy,
+    },
+    { signal }
+  );
   return data;
 }
 
@@ -120,11 +195,13 @@ export async function simulateStream(
   onStage: (event: SimulationStreamEvent) => void,
   claims?: ClaimItem[],
   evidences?: EvidenceItem[],
-  report?: ReportResponse
+  report?: ReportResponse,
+  signal?: AbortSignal
 ): Promise<void> {
   const response = await fetch(`${API_BASE}/simulate/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal,
     body: JSON.stringify({
       text,
       claims,
@@ -201,6 +278,57 @@ export async function updateHistoryContent(
   await api.post(`/history/${recordId}/content`, content);
 }
 
+// ========== Pipeline State Persistence API ==========
+
+export type PipelinePhaseSnapshot = {
+  phase: Phase;
+  status: PhaseStatus;
+  updated_at: string;
+  duration_ms?: number | null;
+  error_message?: string | null;
+  payload?: Record<string, unknown> | null;
+};
+
+export type PipelineStateUpsertRequest = {
+  task_id: string;
+  input_text: string;
+  phases: PhaseState;
+  phase: Phase;
+  status: PhaseStatus;
+  duration_ms?: number | null;
+  error_message?: string | null;
+  payload?: Record<string, unknown> | null;
+  meta?: Record<string, unknown> | null;
+};
+
+export type PipelineStateUpsertResponse = {
+  task_id: string;
+  phase: Phase;
+  status: PhaseStatus;
+  updated_at: string;
+};
+
+export type PipelineStateLatestResponse = {
+  task_id: string;
+  input_text: string;
+  phases: PhaseState;
+  meta: Record<string, unknown>;
+  updated_at: string;
+  snapshots: PipelinePhaseSnapshot[];
+};
+
+export async function savePipelinePhaseSnapshot(
+  payload: PipelineStateUpsertRequest
+): Promise<PipelineStateUpsertResponse> {
+  const { data } = await api.post<PipelineStateUpsertResponse>('/pipeline/save-phase', payload);
+  return data;
+}
+
+export async function loadLatestPipelineState(): Promise<PipelineStateLatestResponse> {
+  const { data } = await api.get<PipelineStateLatestResponse>('/pipeline/load-latest');
+  return data;
+}
+
 // ========== 应对内容生成 API ==========
 
 export async function generateContent(
@@ -229,4 +357,83 @@ export async function generatePlatformScripts(
 ): Promise<ContentGenerateResponse['platform_scripts']> {
   const { data } = await api.post<ContentGenerateResponse['platform_scripts']>('/content/platform-scripts', request);
   return data;
+}
+
+// ========== Chat Workbench API ==========
+
+export type ChatAction =
+  | { type: 'link'; label: string; href: string }
+  | { type: 'command'; label: string; command: string };
+
+export type ChatReference = {
+  title: string;
+  href: string;
+  description?: string;
+};
+
+export type ChatMessage = {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  actions?: ChatAction[];
+  references?: ChatReference[];
+};
+
+export type ChatSendRequest = {
+  session_id?: string | null;
+  text: string;
+  context?: Record<string, unknown> | null;
+};
+
+export type ChatSendResponse = {
+  session_id: string;
+  assistant_message: ChatMessage;
+};
+
+export async function chatSend(payload: ChatSendRequest): Promise<ChatSendResponse> {
+  const { data } = await api.post<ChatSendResponse>('/chat', payload);
+  return data;
+}
+
+export type ChatStreamEvent =
+  | { type: 'token'; data: { content: string; session_id: string } }
+  | { type: 'message'; data: { session_id: string; message: ChatMessage } }
+  | { type: 'done'; data: { session_id: string } }
+  | { type: 'error'; data: { session_id: string; message: string } };
+
+export async function chatStream(
+  payload: ChatSendRequest,
+  onEvent: (event: ChatStreamEvent) => void
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/chat/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(`Chat stream failed: ${response.status}`);
+  }
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('No response body');
+  }
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try {
+          const event = JSON.parse(line.slice(6)) as ChatStreamEvent;
+          onEvent(event);
+        } catch {
+          console.warn('Failed to parse chat SSE event:', line);
+        }
+      }
+    }
+  }
 }

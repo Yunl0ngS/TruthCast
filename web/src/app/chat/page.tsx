@@ -1,24 +1,14 @@
 'use client';
 
 import { ProgressTimeline } from '@/components/layout';
-import { SimulationView, ExportButton } from '@/components/features';
-import { ErrorBoundary } from '@/components/ui/error-boundary';
+import { ExportButton } from '@/components/features';
+import { ChatWorkbench } from '@/components/features/chat-workbench';
 import { usePipelineStore } from '@/stores/pipeline-store';
 import type { Phase } from '@/types';
 
-export default function SimulationPage() {
-  const {
-    text,
-    detectData,
-    claims,
-    evidences,
-    report,
-    simulation,
-    content,
-    phases,
-    retryPhase,
-    interruptPipeline,
-  } = usePipelineStore();
+export default function ChatPage() {
+  const { text, detectData, claims, evidences, report, simulation, content, phases, retryPhase, interruptPipeline } =
+    usePipelineStore();
 
   const hasReport = report !== null;
 
@@ -27,18 +17,23 @@ export default function SimulationPage() {
   };
 
   return (
-    <div className="space-y-6">
-      {/* 进度时间线 + 导出按钮 */}
-      <div className="flex flex-col items-center gap-4">
+    <div
+      className={
+        "flex flex-col gap-4 overflow-hidden " +
+        // 让聊天工作台尽量接近满屏：抵消 RootLayout main 的 padding，并用视口高度约束整体
+        "-mx-2 sm:-mx-4 -my-4 md:-my-6 px-2 sm:px-4 py-4 md:py-6 " +
+        "h-[calc(100dvh-3.5rem)] min-h-0"
+      }
+    >
+      <div className="flex flex-col items-center gap-3 shrink-0">
         <ProgressTimeline
           phases={phases}
           onRetry={handleRetry}
           onAbort={interruptPipeline}
           showRetry={true}
           mobileMode="collapsible"
-          rememberExpandedKey="timeline_simulation"
+          rememberExpandedKey="timeline_chat"
         />
-
         {hasReport && (
           <ExportButton
             data={{
@@ -54,9 +49,11 @@ export default function SimulationPage() {
           />
         )}
       </div>
-      <ErrorBoundary title="舆情预演加载失败">
-        <SimulationView simulation={simulation} isLoading={phases.simulation === 'running'} />
-      </ErrorBoundary>
+
+      <div className="flex-1 min-h-0">
+        <ChatWorkbench />
+      </div>
     </div>
   );
 }
+

@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import { Header } from '@/components/layout';
+import { PipelineHydrator } from '@/components/layout/pipeline-hydrator';
 import { Toaster } from '@/components/ui/toaster';
 
 const geistSans = Geist({
@@ -30,6 +31,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-background`}
       >
         <Header />
+        <PipelineHydrator />
         <main className="container mx-auto py-4 md:py-6 max-w-7xl px-2 sm:px-4">{children}</main>
         <Toaster />
       </body>
