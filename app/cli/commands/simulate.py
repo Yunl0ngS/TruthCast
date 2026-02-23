@@ -189,8 +189,9 @@ def simulate(
     
     if stream:
         # SSE streaming mode
-        typer.echo(f"🔄 正在流式输出舆情预演结果... (record_id: {record})")
-        typer.echo("Press Ctrl+C to cancel\n")
+        if not json_output:
+            typer.echo(f"🔄 正在流式输出舆情预演结果... (record_id: {record})")
+            typer.echo("Press Ctrl+C to cancel\n")
         
         try:
             # Call /simulate/stream with raw response using stream method
@@ -243,20 +244,24 @@ def simulate(
                                     accumulated_data.update(event)
                                     _format_suggestion_stage(event)
                                     # Final stage: add separator
-                                    typer.echo("\n" + "="*60)
-                                    typer.echo("✅ 舆情预演完成 (Complete)")
-                                    typer.echo("="*60 + "\n")
+                                    if not json_output:
+                                        typer.echo("\n" + "="*60)
+                                        typer.echo("✅ 舆情预演完成 (Complete)")
+                                        typer.echo("="*60 + "\n")
         
         except KeyboardInterrupt:
-            typer.echo("\n\n⏹️ 预演已取消 (Cancelled by user)", err=True)
+            if not json_output:
+                typer.echo("\n\n⏹️ 预演已取消 (Cancelled by user)", err=True)
             raise typer.Exit(code=130)
         except Exception as e:
-            typer.echo(f"❌ 流式传输错误: {str(e)}", err=True)
+            if not json_output:
+                typer.echo(f"❌ 流式传输错误: {str(e)}", err=True)
             raise typer.Exit(code=1)
     
     else:
         # Non-streaming mode (fetch complete result)
-        typer.echo(f"🔄 正在生成舆情预演结果... (record_id: {record})")
+        if not json_output:
+            typer.echo(f"🔄 正在生成舆情预演结果... (record_id: {record})")
         try:
             result = client.post("/simulate", json=payload)
             
