@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,8 +12,25 @@ import { FileSearch, AlertCircle } from 'lucide-react';
 
 export default function HomePage() {
   const router = useRouter();
-  const { text, error, setText, runPipeline } = usePipelineStore();
+  const {
+    text,
+    error,
+    setText,
+    runPipeline,
+    restorableTaskId,
+    restorableUpdatedAt,
+    hydrateFromLatest,
+  } = usePipelineStore();
   const isLoading = useIsLoading();
+
+  const [restoreDisabled, setRestoreDisabled] = useState(false);
+  useEffect(() => {
+    try {
+      setRestoreDisabled(sessionStorage.getItem('truthcast_restore_disabled') === '1');
+    } catch {
+      setRestoreDisabled(false);
+    }
+  }, []);
 
   const handleRun = async () => {
     if (!text.trim()) {
@@ -61,6 +79,30 @@ export default function HomePage() {
               {isLoading ? '分析中...' : '开始分析'}
             </Button>
           </div>
+
+          {restorableTaskId && restoreDisabled && (
+            <div className="pt-2 flex flex-col items-center gap-2 text-sm text-muted-foreground">
+              <div>
+                已关闭自动恢复提示（本次会话内生效）。
+                {restorableUpdatedAt ? ` 可恢复任务更新时间：${restorableUpdatedAt}` : ''}
+              </div>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  try {
+                    sessionStorage.removeItem('truthcast_restore_disabled');
+                  } catch {
+                    // ignore
+                  }
+                  setRestoreDisabled(false);
+                  void hydrateFromLatest({ taskId: restorableTaskId, force: true });
+                }}
+              >
+                恢复上一次分析
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

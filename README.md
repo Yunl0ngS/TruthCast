@@ -172,6 +172,28 @@ npm run dev
 
 *前端控制台将运行在 `http://localhost:3000`。*
 
+#### 3. 对话工作台 (Chat Workbench)
+
+前端提供统一的对话入口：`http://localhost:3000/chat`。
+
+后端对话相关接口：
+
+- 兼容入口（保持可用）：`POST /chat/stream`
+- 会话化入口（推荐）：
+  - `POST /chat/sessions` 创建会话
+  - `POST /chat/sessions/{session_id}/messages/stream` 发送消息并以 SSE 流式返回
+
+常用命令：
+
+- `/analyze <待分析文本>`：触发一次全链路分析（风险快照→主张→证据→对齐→报告），并写入历史记录。
+- `/load_history <record_id>`：把历史记录加载到前端上下文（然后可打开 `/result` 查看模块化结果）。
+
+会话 DB 默认写入 `data/chat/chat.db`，可通过环境变量覆盖：
+
+```ini
+TRUTHCAST_CHAT_DB_PATH=data/chat/chat.db
+```
+
 ---
 
 ### 方案三：云平台分离部署 (Vercel + Render/Railway)

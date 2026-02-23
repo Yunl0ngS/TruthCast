@@ -29,10 +29,12 @@ import {
   savePipelinePhaseSnapshot,
   updateHistorySimulation,
 } from '@/services/api';
-import type { SimulationStreamEvent } from '@/services/api';
+import type { SimulationStage, SimulationStreamEvent } from '@/services/api';
 
 interface PipelineState {
   taskId: string | null;
+  restorableTaskId: string | null;
+  restorableUpdatedAt: string | null;
   text: string;
   error: string | null;
   detectData: DetectResponse | null;
@@ -42,19 +44,29 @@ interface PipelineState {
   evidences: EvidenceItem[];
   report: ReportResponse | null;
   simulation: SimulateResponse | null;
+  simulationStage: string | null;
+  simulationStageAt: string | null;
   // 内容生成允许"逐步生成"，因此使用 ContentDraft 保存阶段性结果
   content: ContentDraft | null;
   phases: PhaseState;
   abortController: AbortController | null;
   isFromHistory: boolean;
   recordId: string | null;
+  setTaskId: (taskId: string | null) => void;
+  setRestorable: (taskId: string | null, updatedAt?: string | null) => void;
+  probeLatestRestorable: () => Promise<void>;
   
   setText: (text: string) => void;
   setPhase: (phase: Phase, status: PhaseStatus) => void;
   setError: (error: string | null) => void;
   setContent: (content: ContentDraft | null) => void;
-  hydrateFromLatest: () => Promise<void>;
-  runPipeline: () => Promise<void>;
+  setSimulationStage: (stage: SimulationStage | null, at?: string | null) => void;
+  hydrateFromLatest: (opts?: {
+    taskId?: string | null;
+    silent?: boolean;
+    force?: boolean;
+  }) => Promise<void>;
+  runPipeline: (opts?: { taskId?: string | null }) => Promise<void>;
   interruptPipeline: () => void;
   retryPhase: (phase: Phase) => Promise<void>;
   retryFailed: () => Promise<void>;
@@ -73,6 +85,8 @@ const INIT_PHASE_STATE: PhaseState = {
 
 const initialState = {
   taskId: null as string | null,
+  restorableTaskId: null as string | null,
+  restorableUpdatedAt: null as string | null,
   text: '网传某事件"100%真实且必须立刻转发"，消息来源为内部人士，请快速核查其真实性风险。',
   error: null,
   detectData: null as DetectResponse | null,
@@ -82,12 +96,16 @@ const initialState = {
   evidences: [] as EvidenceItem[],
   report: null as ReportResponse | null,
   simulation: null as SimulateResponse | null,
+  simulationStage: null as string | null,
+  simulationStageAt: null as string | null,
   content: null as ContentDraft | null,
   phases: INIT_PHASE_STATE,
   abortController: null as AbortController | null,
   isFromHistory: false,
   recordId: null as string | null,
 };
+
+const DEFAULT_TEXT = initialState.text;
 
 function _makeTaskId(): string {
   try {
@@ -163,6 +181,28 @@ async function _persistPhaseSnapshot(
 export const usePipelineStore = create<PipelineState>((set, get) => ({
   ...initialState,
 
+  setTaskId: (taskId) => set({ taskId }),
+
+  setRestorable: (taskId, updatedAt) =>
+    set({
+      restorableTaskId: taskId,
+      restorableUpdatedAt: updatedAt ?? null,
+    }),
+
+  probeLatestRestorable: async () => {
+    try {
+      const latest = await loadLatestPipelineState();
+      if (!latest.task_id || !latest.updated_at) return;
+      const hasAnySnapshot = (latest.snapshots ?? []).length > 0;
+      if (!hasAnySnapshot) return;
+
+      // 只“探测”可恢复任务，不做实际恢复
+      get().setRestorable(latest.task_id, latest.updated_at);
+    } catch (err) {
+      console.warn('[pipeline persistence] probe latest failed:', err);
+    }
+  },
+
   setText: (text) => set({ text }),
   
   setPhase: (phase, status) =>
@@ -174,11 +214,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
 
   setContent: (content) => set({ content }),
 
-  hydrateFromLatest: async () => {
+  // 仅供模拟流式阶段展示：记录当前阶段与时间戳（便于 Chat Workbench 生成分阶段卡片）
+  setSimulationStage: (stage: SimulationStage | null, at?: string | null) =>
+    set({ simulationStage: stage, simulationStageAt: at ?? new Date().toISOString() }),
+
+  hydrateFromLatest: async (opts) => {
     // 若当前已经有进行中的 task（非全 idle），不要覆盖
     const current = get();
+    const hasManualText = current.text.trim() && current.text !== DEFAULT_TEXT;
     const hasProgress =
-      current.taskId ||
       current.detectData ||
       current.claims.length > 0 ||
       current.evidences.length > 0 ||
@@ -186,10 +230,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       current.simulation ||
       current.content ||
       Object.values(current.phases).some((v) => v !== 'idle');
-    if (hasProgress) return;
+    if (!opts?.force) {
+      if (hasProgress) return;
+      if (hasManualText) return;
+    }
 
     try {
-      const latest = await loadLatestPipelineState();
+      const latest = await loadLatestPipelineState(opts?.taskId);
       if (!latest.task_id || !latest.updated_at) return;
 
       // 后端没有任何快照时 phases 可能全 idle；这种情况不覆盖
@@ -203,6 +250,12 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
         error: null,
         isFromHistory: false,
       };
+
+      // meta 中可能包含 recordId（例如 chat 会话写入的 snapshot meta）
+      const metaRecordId = (latest.meta as any)?.recordId ?? (latest.meta as any)?.record_id;
+      if (typeof metaRecordId === 'string' && metaRecordId) {
+        next.recordId = metaRecordId;
+      }
 
       for (const snap of latest.snapshots ?? []) {
         const payload = (snap.payload ?? {}) as any;
@@ -232,7 +285,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       }
 
       set(next as any);
-      toast.success('已从数据库恢复上一次分析进度');
+      if (!opts?.silent) {
+        toast.success('已从数据库恢复上一次分析进度');
+      }
     } catch (err) {
       console.warn('[pipeline persistence] load-latest failed:', err);
     }
@@ -270,14 +325,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
     }
   },
 
-  runPipeline: async () => {
+  runPipeline: async (opts) => {
     const { text, setPhase, setError } = get();
 
     // 每次启动分析都生成新的 AbortController
     const controller = new AbortController();
     const signal = controller.signal;
     
-    const taskId = _makeTaskId();
+    const taskId = (opts?.taskId && String(opts.taskId)) || _makeTaskId();
     set({
       taskId,
       error: null,
@@ -446,6 +501,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
             text,
             (event: SimulationStreamEvent) => {
               console.log('[Simulation Stream] Received event:', event.stage, event.data);
+              const now = Date.now();
               const currentSimulation = get().simulation || {
                 emotion_distribution: {},
                 stance_distribution: {},
@@ -462,6 +518,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
 
               console.log('[Simulation Stream] Updated simulation:', updatedSimulation);
               set({ simulation: updatedSimulation });
+
+              // 记录阶段（供 Chat Workbench 分阶段卡片使用）
+              set({
+                simulationStage: event.stage,
+                simulationStageAt: new Date(now).toISOString(),
+              });
+
               // 流式阶段中也允许增量落库（避免刷新丢阶段产物）
               void _persistPhaseSnapshot(get, 'simulation', 'running');
 
@@ -665,6 +728,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
             text,
             (event: SimulationStreamEvent) => {
               console.log('[Simulation Retry Stream] Received event:', event.stage, event.data);
+              const now = Date.now();
               const currentSimulation = get().simulation || {
                 emotion_distribution: {},
                 stance_distribution: {},
@@ -680,6 +744,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
               } as SimulateResponse;
 
               set({ simulation: updatedSimulation });
+              set({
+                simulationStage: event.stage,
+                simulationStageAt: new Date(now).toISOString(),
+              });
               void _persistPhaseSnapshot(get, 'simulation', 'running');
 
               const stageMessages: Record<string, string> = {

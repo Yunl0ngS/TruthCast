@@ -27,6 +27,7 @@ export interface ChatMessage {
   created_at: string;
   actions?: ChatAction[];
   references?: ChatReference[];
+  meta?: Record<string, unknown>;
 }
 
 interface ChatState {
@@ -35,12 +36,16 @@ interface ChatState {
   is_streaming: boolean;
   setStreaming: (value: boolean) => void;
   setSessionId: (sessionId: string) => void;
+  setMessages: (messages: ChatMessage[]) => void;
   addMessage: (
     role: ChatRole,
     content: string,
     extra?: Pick<ChatMessage, 'actions' | 'references'>
   ) => string;
-  updateMessage: (id: string, patch: Partial<Pick<ChatMessage, 'content' | 'actions' | 'references'>>) => void;
+  updateMessage: (
+    id: string,
+    patch: Partial<Pick<ChatMessage, 'content' | 'actions' | 'references' | 'meta'>>
+  ) => void;
   appendToMessage: (id: string, delta: string) => void;
   reset: () => void;
 }
@@ -61,7 +66,8 @@ export const useChatStore = create<ChatState>((set) => ({
       role: 'assistant',
       content:
         '这里是“对话工作台”首版：支持用命令快速驱动现有分析流水线。\n\n- 直接输入待分析文本并发送：会自动启动分析\n- 或使用 /analyze <文本>\n- /retry_failed 重试失败阶段\n- /retry <phase> 例如 /retry report\n\n后续会接入后端对话编排与真正的流式回答。',
-      created_at: new Date().toISOString(),
+      // 避免 Next.js 预渲染时 server/client 生成不同时间导致 hydration mismatch
+      created_at: '1970-01-01T00:00:00.000Z',
       actions: [
         { type: 'link', label: '打开检测结果', href: '/result' },
         { type: 'link', label: '打开舆情预演', href: '/simulation' },
@@ -73,6 +79,7 @@ export const useChatStore = create<ChatState>((set) => ({
   is_streaming: false,
   setStreaming: (value) => set({ is_streaming: value }),
   setSessionId: (sessionId) => set({ session_id: sessionId }),
+  setMessages: (messages) => set({ messages }),
   addMessage: (role, content, extra) => {
     const id = newMessageId();
     set((state) => ({

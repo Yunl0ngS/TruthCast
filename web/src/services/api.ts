@@ -324,8 +324,9 @@ export async function savePipelinePhaseSnapshot(
   return data;
 }
 
-export async function loadLatestPipelineState(): Promise<PipelineStateLatestResponse> {
-  const { data } = await api.get<PipelineStateLatestResponse>('/pipeline/load-latest');
+export async function loadLatestPipelineState(taskId?: string | null): Promise<PipelineStateLatestResponse> {
+  const url = taskId ? `/pipeline/load-latest?task_id=${encodeURIComponent(taskId)}` : '/pipeline/load-latest';
+  const { data } = await api.get<PipelineStateLatestResponse>(url);
   return data;
 }
 
@@ -376,6 +377,7 @@ export type ChatMessage = {
   content: string;
   actions?: ChatAction[];
   references?: ChatReference[];
+  meta?: Record<string, unknown>;
 };
 
 export type ChatSendRequest = {
@@ -389,6 +391,46 @@ export type ChatSendResponse = {
   assistant_message: ChatMessage;
 };
 
+export type ChatSession = {
+  session_id: string;
+  title?: string | null;
+  created_at: string;
+  updated_at: string;
+  meta?: Record<string, unknown>;
+};
+
+export type ChatSessionListResponse = {
+  sessions: ChatSession[];
+};
+
+export type ChatSessionDetailResponse = {
+  session: ChatSession;
+  messages: Array<ChatMessage & { id?: string; created_at?: string; meta?: Record<string, unknown> }>;
+};
+
+export async function createChatSession(payload?: {
+  title?: string | null;
+  meta?: Record<string, unknown> | null;
+}): Promise<ChatSession> {
+  const { data } = await api.post<ChatSession>('/chat/sessions', payload ?? {});
+  return data;
+}
+
+export async function listChatSessions(limit = 20): Promise<ChatSessionListResponse> {
+  const { data } = await api.get<ChatSessionListResponse>('/chat/sessions', { params: { limit } });
+  return data;
+}
+
+export async function getChatSessionDetail(
+  sessionId: string,
+  limit = 50
+): Promise<ChatSessionDetailResponse> {
+  const { data } = await api.get<ChatSessionDetailResponse>(`/chat/sessions/${sessionId}`, {
+    params: { limit },
+  });
+  return data;
+}
+
 export async function chatSend(payload: ChatSendRequest): Promise<ChatSendResponse> {
   const { data } = await api.post<ChatSendResponse>('/chat', payload);
   return data;
@@ -396,6 +438,7 @@ export async function chatSend(payload: ChatSendRequest): Promise<ChatSendRespon
 
 export type ChatStreamEvent =
   | { type: 'token'; data: { content: string; session_id: string } }
+  | { type: 'stage'; data: { session_id: string; stage: string; status: string; message?: string } }
   | { type: 'message'; data: { session_id: string; message: ChatMessage } }
   | { type: 'done'; data: { session_id: string } }
   | { type: 'error'; data: { session_id: string; message: string } };
@@ -432,6 +475,50 @@ export async function chatStream(
           onEvent(event);
         } catch {
           console.warn('Failed to parse chat SSE event:', line);
+        }
+      }
+    }
+  }
+}
+
+export type ChatSessionMessageStreamRequest = {
+  text: string;
+  context?: Record<string, unknown> | null;
+};
+
+export async function chatSessionStream(
+  sessionId: string,
+  payload: ChatSessionMessageStreamRequest,
+  onEvent: (event: ChatStreamEvent) => void
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/chat/sessions/${sessionId}/messages/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(`Chat session stream failed: ${response.status}`);
+  }
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('No response body');
+  }
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try {
+          const event = JSON.parse(line.slice(6)) as ChatStreamEvent;
+          onEvent(event);
+        } catch {
+          console.warn('Failed to parse chat session SSE event:', line);
         }
       }
     }

@@ -65,6 +65,8 @@ export function RiskOverview({ data, isLoading }: RiskOverviewProps) {
     return <RiskOverviewEmpty />;
   }
 
+  const reasons = Array.isArray(data.reasons) ? data.reasons : [];
+
   const labelColors: Record<string, string> = {
     credible: 'bg-green-500',
     suspicious: 'bg-yellow-500',
@@ -115,12 +117,16 @@ export function RiskOverview({ data, isLoading }: RiskOverviewProps) {
         </div>
 
         <ul className="space-y-1.5 text-sm">
-          {data.reasons.map((reason, index) => (
-            <li key={index} className="flex items-start gap-2">
-              <span className="text-muted-foreground mt-0.5">•</span>
-              <span>{zhText(reason)}</span>
-            </li>
-          ))}
+          {reasons.length > 0 ? (
+            reasons.map((reason, index) => (
+              <li key={index} className="flex items-start gap-2">
+                <span className="text-muted-foreground mt-0.5">•</span>
+                <span>{zhText(reason)}</span>
+              </li>
+            ))
+          ) : (
+            <li className="text-muted-foreground">暂无具体原因（可能是历史恢复数据不包含 reasons 字段）</li>
+          )}
         </ul>
       </CardContent>
     </Card>
