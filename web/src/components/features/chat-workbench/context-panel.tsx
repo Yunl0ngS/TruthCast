@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { DetectResponse, ReportResponse, SimulateResponse, ContentDraft } from '@/types';
 import type { Phase, PhaseState } from '@/types';
+import { zhRiskLabel } from '@/lib/i18n';
 
 const PHASE_LABEL: Record<Phase, string> = {
   detect: '风险快照',
@@ -135,11 +136,11 @@ export function ContextPanel({
 
           <div>
             <span className="text-muted-foreground">风险快照：</span>
-            {detectData ? `${detectData.label}（${detectData.score}）` : '未生成'}
+            {detectData ? `${zhRiskLabel(detectData.label)}（${detectData.score}）` : '未生成'}
           </div>
           <div>
             <span className="text-muted-foreground">综合报告：</span>
-            {report ? `${report.risk_label}（${report.risk_score}）` : '未生成'}
+            {report ? `${zhRiskLabel(report.risk_label)}（${report.risk_score}）` : '未生成'}
           </div>
           <div>
             <span className="text-muted-foreground">舆情预演：</span>

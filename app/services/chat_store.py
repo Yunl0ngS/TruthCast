@@ -327,3 +327,42 @@ def list_messages(session_id: str, limit: int = 50) -> list[dict[str, Any]]:
         )
     return results
 
+
+def update_session_meta(session_id: str, key: str, value: Any) -> bool:
+    """更新会话 meta 中的某个字段（增量更新，不影响其他字段）。"""
+    init_db()
+    session = get_session(session_id)
+    if session is None:
+        return False
+
+    meta = session.get("meta", {})
+    meta[key] = value
+    meta_json = json.dumps(jsonable_encoder(meta), ensure_ascii=False)
+
+    sql = "UPDATE chat_sessions SET meta_json=?, updated_at=? WHERE session_id=?"
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    db_path = _get_active_db_path()
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(sql, (meta_json, now, session_id))
+            conn.commit()
+    except sqlite3.OperationalError as exc:
+        if not _is_disk_io_error(exc):
+            raise
+        fallback = _set_fallback_db_path()
+        _create_tables(fallback)
+        with sqlite3.connect(fallback) as conn:
+            conn.execute(sql, (meta_json, now, session_id))
+            conn.commit()
+
+    return True
+
+
+def get_session_meta(session_id: str) -> dict[str, Any]:
+    """获取会话 meta（便捷方法）。"""
+    session = get_session(session_id)
+    if session is None:
+        return {}
+    return session.get("meta", {})
+

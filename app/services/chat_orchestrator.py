@@ -6,9 +6,19 @@ from typing import Any, Iterator, Literal
 from pydantic import BaseModel, Field
 
 from app.core.concurrency import llm_slot
+from app.core.guardrails import (
+    build_guardrails_warning_message,
+    sanitize_text,
+    validate_tool_call,
+)
 from app.orchestrator import orchestrator
 from app.schemas.chat import ChatAction, ChatMessage, ChatReference, ChatStreamEvent
 from app.services.history_store import get_history, list_history, save_report
+from app.services.intent_classifier import (
+    IntentName,
+    build_suggested_actions,
+    classify_intent,
+)
 from app.services.pipeline import align_evidences
 from app.services.risk_snapshot import detect_risk_snapshot
 
@@ -26,19 +36,40 @@ class ToolWhyArgs(BaseModel):
 
 
 class ToolListArgs(BaseModel):
-    limit: int = Field(default=10, ge=0, le=50)
+    limit: int = Field(default=10, ge=1, le=50)
 
 
 class ToolMoreEvidenceArgs(BaseModel):
-    record_id: str = Field(min_length=1, max_length=128)
+    record_id: str = Field(default="", max_length=128)
 
 
 class ToolRewriteArgs(BaseModel):
-    record_id: str = Field(min_length=1, max_length=128)
+    record_id: str = Field(default="", max_length=128)
     style: str = Field(default="short", max_length=32)
 
 
-ToolName = Literal["analyze", "load_history", "why", "list", "more_evidence", "rewrite", "help"]
+class ToolCompareArgs(BaseModel):
+    record_id_1: str = Field(min_length=1, max_length=128)
+    record_id_2: str = Field(min_length=1, max_length=128)
+
+
+class ToolDeepDiveArgs(BaseModel):
+    record_id: str = Field(min_length=1, max_length=128)
+    focus: str = Field(default="general", max_length=32)
+    claim_index: int | None = Field(default=None, ge=0)
+
+
+ToolName = Literal[
+    "analyze",
+    "load_history",
+    "why",
+    "list",
+    "more_evidence",
+    "rewrite",
+    "compare",
+    "deep_dive",
+    "help",
+]
 
 
 def _is_analyze_intent(text: str) -> bool:
@@ -56,15 +87,18 @@ def _extract_analyze_text(text: str) -> str:
     return t
 
 
-def parse_tool(text: str) -> tuple[ToolName, dict[str, Any]]:
+def parse_tool(text: str, session_meta: dict[str, Any] | None = None) -> tuple[ToolName, dict[str, Any]]:
     """把用户输入解析为后端允许的工具调用。
 
     约束：只允许白名单工具。
+    支持意图识别（自然语言 -> 工具映射）。
     """
 
     t = text.strip()
     if not t:
         return ("help", {})
+
+    meta = session_meta or {}
 
     if t.startswith("/load_history"):
         parts = re.split(r"\s+", t)
@@ -74,10 +108,11 @@ def parse_tool(text: str) -> tuple[ToolName, dict[str, Any]]:
     if t.startswith("/why") or t.startswith("/explain"):
         parts = re.split(r"\s+", t)
         record_id = parts[1] if len(parts) >= 2 else ""
+        if not record_id:
+            record_id = str(meta.get("record_id") or meta.get("bound_record_id") or "")
         return ("why", {"record_id": record_id})
 
     if t.startswith("/list") or t.startswith("/history") or t.startswith("/records"):
-        # 支持：/list 20 或 /list limit=20
         parts = re.split(r"\s+", t)
         limit = 10
         if len(parts) >= 2:
@@ -91,23 +126,100 @@ def parse_tool(text: str) -> tuple[ToolName, dict[str, Any]]:
         return ("list", {"limit": limit})
 
     if t.startswith("/more_evidence") or t.startswith("/more"):
-        # 支持：/more_evidence（record_id 将在路由层从 context 兜底）
-        return ("more_evidence", {"record_id": ""})
+        record_id = str(meta.get("record_id") or meta.get("bound_record_id") or "")
+        return ("more_evidence", {"record_id": record_id})
 
     if t.startswith("/rewrite"):
-        # 支持：/rewrite [style]（record_id 将在路由层从 context 兜底）
-        # style: short/neutral/friendly
         parts = re.split(r"\s+", t)
         style = parts[1].strip() if len(parts) >= 2 else "short"
         if style.startswith("style="):
             style = style[len("style=") :]
-        return ("rewrite", {"record_id": "", "style": style})
+        record_id = str(meta.get("record_id") or meta.get("bound_record_id") or "")
+        return ("rewrite", {"record_id": record_id, "style": style})
+
+    if t.startswith("/compare"):
+        parts = re.split(r"\s+", t)
+        record_id_1 = parts[1] if len(parts) >= 2 else ""
+        record_id_2 = parts[2] if len(parts) >= 3 else ""
+        bound_id = str(meta.get("record_id") or meta.get("bound_record_id") or "")
+        if not record_id_1 and bound_id:
+            record_id_1 = bound_id
+        return ("compare", {"record_id_1": record_id_1, "record_id_2": record_id_2})
+
+    if t.startswith("/deep_dive") or t.startswith("/deepdive"):
+        parts = re.split(r"\s+", t)
+        record_id = parts[1] if len(parts) >= 2 else ""
+        focus = parts[2] if len(parts) >= 3 else "general"
+        claim_index = None
+        if len(parts) >= 4:
+            try:
+                claim_index = int(parts[3])
+            except ValueError:
+                pass
+        if not record_id:
+            record_id = str(meta.get("record_id") or meta.get("bound_record_id") or "")
+        return ("deep_dive", {"record_id": record_id, "focus": focus, "claim_index": claim_index})
 
     if _is_analyze_intent(t):
         analyze_text = _extract_analyze_text(t)
         return ("analyze", {"text": analyze_text})
 
+    intent, intent_args = classify_intent(t)
+    tool_name = _intent_to_tool(intent)
+    if tool_name != "help":
+        args = _merge_intent_args(tool_name, intent_args, meta)
+        return (tool_name, args)
+
     return ("help", {})
+
+
+def _intent_to_tool(intent: IntentName) -> ToolName:
+    """将意图名称映射到工具名称。"""
+    mapping: dict[IntentName, ToolName] = {
+        "why": "why",
+        "compare": "compare",
+        "deep_dive": "deep_dive",
+        "content": "help",
+        "more_evidence": "more_evidence",
+        "list": "list",
+        "analyze": "analyze",
+        "help": "help",
+        "unknown": "help",
+    }
+    return mapping.get(intent, "help")
+
+
+def _merge_intent_args(tool_name: ToolName, intent_args: dict[str, Any], meta: dict[str, Any]) -> dict[str, Any]:
+    """合并意图参数与 session meta。"""
+    bound_record_id = str(meta.get("record_id") or meta.get("bound_record_id") or "")
+
+    if tool_name == "why":
+        record_id = intent_args.get("record_id") or bound_record_id
+        return {"record_id": record_id}
+
+    if tool_name == "deep_dive":
+        record_id = intent_args.get("record_id") or bound_record_id
+        return {
+            "record_id": record_id,
+            "focus": intent_args.get("focus", "general"),
+            "claim_index": intent_args.get("claim_index"),
+        }
+
+    if tool_name == "compare":
+        record_id_1 = intent_args.get("record_id_1") or bound_record_id
+        return {"record_id_1": record_id_1, "record_id_2": intent_args.get("record_id_2", "")}
+
+    if tool_name == "more_evidence":
+        record_id = intent_args.get("record_id") or bound_record_id
+        return {"record_id": record_id}
+
+    if tool_name == "list":
+        return {"limit": intent_args.get("limit", 10)}
+
+    if tool_name == "analyze":
+        return {"text": intent_args.get("text", "")}
+
+    return intent_args
 
 
 def build_help_message() -> ChatMessage:
@@ -117,11 +229,15 @@ def build_help_message() -> ChatMessage:
             "当前对话工作台已启用后端工具白名单编排（V2）。\n\n"
             "可用命令：\n"
             "- /analyze <待分析文本>：发起全链路分析\n"
-            "- /load_history <record_id>：加载历史记录到前端上下文\n\n"
-            "- /why <record_id>：解释为什么给出该风险/结论（最小可用）\n\n"
-            "- /list [N]：列出最近 N 条历史记录的 record_id（默认 10，例如 /list 20）\n\n"
-            "- /more_evidence：基于当前上下文，给出补充证据的下一步动作（例如重试证据阶段）\n"
-            "- /rewrite [short|neutral|friendly]：基于当前上下文，将解释改写为更短/更中性/更亲切的版本\n\n"
+            "- /load_history <record_id>：加载历史记录到前端上下文\n"
+            "- /why <record_id>：解释为什么给出该风险/结论（最小可用）\n"
+            "- /list [N]：列出最近 N 条历史记录的 record_id（默认 10，例如 /list 20）\n"
+            "- /more_evidence：基于当前上下文，给出补充证据的下一步动作\n"
+            "- /rewrite [short|neutral|friendly]：改写解释版本\n"
+            "- /compare <record_id_1> <record_id_2>：对比两条历史记录的分析结果\n"
+            "- /deep_dive <record_id> [focus] [claim_index]：深入分析某一焦点领域\n"
+            "  - focus 可选：general（默认）/evidence/claims/timeline/sources\n"
+            "  - claim_index：指定深入分析第几条主张（从0开始）\n\n"
             "record_id 来源：分析完成后会写入历史记录；也可以用 /list 查询后再 /load_history {record_id}。\n\n"
             "你也可以直接粘贴长文本（系统会自动视为待分析内容）。"
         ),
@@ -276,6 +392,22 @@ def run_load_history(args: ToolLoadHistoryArgs) -> ChatMessage:
     )
 
 
+def _calc_evidence_insufficient_ratio(claim_reports: list[dict[str, Any]]) -> float:
+    """计算证据不足的比例。"""
+    if not claim_reports:
+        return 0.0
+    total = 0
+    insufficient = 0
+    for cr in claim_reports:
+        for ev in cr.get("evidences", []):
+            total += 1
+            if ev.get("stance") == "insufficient_evidence":
+                insufficient += 1
+    if total == 0:
+        return 0.0
+    return insufficient / total
+
+
 def run_why(args: ToolWhyArgs) -> ChatMessage:
     record = get_history(args.record_id)
     if not record:
@@ -401,20 +533,36 @@ def run_why(args: ToolWhyArgs) -> ChatMessage:
     lines.append("")
     lines.append("提示：你可以先加载该 record_id 到前端上下文，再打开结果页查看完整模块化结果与证据链。")
 
+    risk_score_val = report.get("risk_score") or record.get("risk_score") or 0
+    evidence_insufficient_ratio = _calc_evidence_insufficient_ratio(claim_reports)
+
+    base_actions: list[ChatAction] = [
+        ChatAction(type="command", label="加载到前端上下文", command=f"/load_history {record['id']}"),
+        ChatAction(type="command", label="补充证据（/more_evidence）", command="/more_evidence"),
+    ]
+
+    if risk_score_val >= 70:
+        base_actions.append(ChatAction(type="link", label="生成应对内容", href="/content"))
+        base_actions.append(ChatAction(type="command", label="深入分析证据", command=f"/deep_dive {record['id']} evidence"))
+    else:
+        base_actions.append(ChatAction(type="command", label="查看证据来源", command=f"/deep_dive {record['id']} sources"))
+        base_actions.append(ChatAction(type="command", label="对比历史记录", command="/list"))
+
+    if evidence_insufficient_ratio > 0.5:
+        base_actions.insert(0, ChatAction(type="command", label="补充检索证据", command="/more_evidence"))
+
+    base_actions.extend([
+        ChatAction(type="command", label="改写为短版（/rewrite short）", command="/rewrite short"),
+        ChatAction(type="command", label="改写为中性版（/rewrite neutral）", command="/rewrite neutral"),
+        ChatAction(type="command", label="改写为亲切版（/rewrite friendly）", command="/rewrite friendly"),
+        ChatAction(type="link", label="打开检测结果", href="/result"),
+        ChatAction(type="link", label="打开历史记录", href="/history"),
+    ])
+
     return ChatMessage(
         role="assistant",
         content="\n".join(lines),
-        actions=[
-            ChatAction(type="command", label="加载到前端上下文", command=f"/load_history {record['id']}"),
-            ChatAction(type="command", label="补充证据（/more_evidence）", command="/more_evidence"),
-            ChatAction(type="command", label="改写为短版（/rewrite short）", command="/rewrite short"),
-            ChatAction(type="command", label="改写为中性版（/rewrite neutral）", command="/rewrite neutral"),
-            ChatAction(type="command", label="改写为亲切版（/rewrite friendly）", command="/rewrite friendly"),
-            ChatAction(type="command", label="重试证据检索（/retry evidence）", command="/retry evidence"),
-            ChatAction(type="command", label="重试综合报告（/retry report）", command="/retry report"),
-            ChatAction(type="link", label="打开检测结果", href="/result"),
-            ChatAction(type="link", label="打开历史记录", href="/history"),
-        ],
+        actions=base_actions,
         references=refs,
         meta={"record_id": record["id"], "blocks": blocks},
     )
@@ -484,31 +632,21 @@ def run_analyze_stream(session_id: str, args: ToolAnalyzeArgs) -> Iterator[str]:
 
     yield f"data: {ChatStreamEvent(type='token', data={'content': '已收到文本，开始分析…\n', 'session_id': session_id}).model_dump_json()}\n\n"
 
-    # 风险快照
-    yield f"data: {ChatStreamEvent(type='token', data={'content': '- 风险快照：计算中…\n', 'session_id': session_id}).model_dump_json()}\n\n"
     with llm_slot():
         risk = detect_risk_snapshot(text)
     yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 风险快照：完成（{risk.label}，score={risk.score}）\n', 'session_id': session_id}).model_dump_json()}\n\n"
 
-    # 主张
-    yield f"data: {ChatStreamEvent(type='token', data={'content': '- 主张抽取：进行中…\n', 'session_id': session_id}).model_dump_json()}\n\n"
     with llm_slot():
         claims = orchestrator.run_claims(text, strategy=risk.strategy)
     yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 主张抽取：完成（{len(claims)} 条）\n', 'session_id': session_id}).model_dump_json()}\n\n"
 
-    # 证据检索
-    yield f"data: {ChatStreamEvent(type='token', data={'content': '- 联网检索证据：进行中…\n', 'session_id': session_id}).model_dump_json()}\n\n"
     evidences = orchestrator.run_evidence(text=text, claims=claims, strategy=risk.strategy)
     yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 联网检索证据：完成（候选 {len(evidences)} 条）\n', 'session_id': session_id}).model_dump_json()}\n\n"
 
-    # 证据聚合与对齐
-    yield f"data: {ChatStreamEvent(type='token', data={'content': '- 证据聚合与对齐：进行中…\n', 'session_id': session_id}).model_dump_json()}\n\n"
     with llm_slot():
         aligned = align_evidences(claims=claims, evidences=evidences, strategy=risk.strategy)
     yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 证据聚合与对齐：完成（对齐 {len(aligned)} 条）\n', 'session_id': session_id}).model_dump_json()}\n\n"
 
-    # 报告
-    yield f"data: {ChatStreamEvent(type='token', data={'content': '- 综合报告：生成中…\n', 'session_id': session_id}).model_dump_json()}\n\n"
     with llm_slot():
         report = orchestrator.run_report(text=text, claims=claims, evidences=aligned, strategy=risk.strategy)
     yield f"data: {ChatStreamEvent(type='token', data={'content': '- 综合报告：完成\n', 'session_id': session_id}).model_dump_json()}\n\n"
@@ -563,4 +701,229 @@ def run_analyze_stream(session_id: str, args: ToolAnalyzeArgs) -> Iterator[str]:
 
     event = ChatStreamEvent(type="message", data={"session_id": session_id, "message": msg.model_dump()})
     yield f"data: {event.model_dump_json()}\n\n"
+
+
+def run_compare(args: ToolCompareArgs) -> ChatMessage:
+    """对比两条历史记录的分析结果。"""
+    record_1 = get_history(args.record_id_1)
+    record_2 = get_history(args.record_id_2)
+
+    errors: list[str] = []
+    if not record_1:
+        errors.append(f"未找到历史记录 1：{args.record_id_1}")
+    if not record_2:
+        errors.append(f"未找到历史记录 2：{args.record_id_2}")
+
+    if errors:
+        return ChatMessage(
+            role="assistant",
+            content="\n".join(errors),
+            actions=[ChatAction(type="link", label="打开历史记录", href="/history")],
+            references=[],
+        )
+
+    report_1 = record_1.get("report") or {}
+    report_2 = record_2.get("report") or {}
+    detect_1 = record_1.get("detect_data") or {}
+    detect_2 = record_2.get("detect_data") or {}
+
+    lines: list[str] = []
+    lines.append("=== 对比分析 ===")
+    lines.append("")
+    lines.append("【记录 1】")
+    lines.append(f"- record_id: {record_1['id']}")
+    lines.append(f"- 风险快照: {detect_1.get('label', record_1.get('risk_label'))} (score={detect_1.get('score', record_1.get('risk_score'))})")
+    lines.append(f"- 报告风险: {report_1.get('risk_label')} (score={report_1.get('risk_score')})")
+    lines.append(f"- 场景: {report_1.get('detected_scenario')}")
+    lines.append(f"- 主张数: {len(report_1.get('claim_reports', []))}")
+    lines.append("")
+
+    lines.append("【记录 2】")
+    lines.append(f"- record_id: {record_2['id']}")
+    lines.append(f"- 风险快照: {detect_2.get('label', record_2.get('risk_label'))} (score={detect_2.get('score', record_2.get('risk_score'))})")
+    lines.append(f"- 报告风险: {report_2.get('risk_label')} (score={report_2.get('risk_score')})")
+    lines.append(f"- 场景: {report_2.get('detected_scenario')}")
+    lines.append(f"- 主张数: {len(report_2.get('claim_reports', []))}")
+    lines.append("")
+
+    score_diff = (report_1.get("risk_score") or 0) - (report_2.get("risk_score") or 0)
+    if score_diff > 10:
+        lines.append(f"风险差异：记录 1 风险更高 (差值: +{score_diff})")
+    elif score_diff < -10:
+        lines.append(f"风险差异：记录 2 风险更高 (差值: {score_diff})")
+    else:
+        lines.append(f"风险差异：两者接近 (差值: {score_diff})")
+
+    blocks: list[dict[str, Any]] = [
+        {
+            "kind": "comparison",
+            "title": "风险对比",
+            "records": [
+                {
+                    "record_id": record_1["id"],
+                    "risk_label": report_1.get("risk_label"),
+                    "risk_score": report_1.get("risk_score"),
+                    "scenario": report_1.get("detected_scenario"),
+                },
+                {
+                    "record_id": record_2["id"],
+                    "risk_label": report_2.get("risk_label"),
+                    "risk_score": report_2.get("risk_score"),
+                    "scenario": report_2.get("detected_scenario"),
+                },
+            ],
+        }
+    ]
+
+    refs: list[ChatReference] = [
+        ChatReference(
+            title=f"历史记录：{record_1['id']}",
+            href="/history",
+            description=f"风险: {record_1.get('risk_label')} ({record_1.get('risk_score')})",
+        ),
+        ChatReference(
+            title=f"历史记录：{record_2['id']}",
+            href="/history",
+            description=f"风险: {record_2.get('risk_label')} ({record_2.get('risk_score')})",
+        ),
+    ]
+
+    return ChatMessage(
+        role="assistant",
+        content="\n".join(lines),
+        actions=[
+            ChatAction(type="command", label="加载记录 1", command=f"/load_history {record_1['id']}"),
+            ChatAction(type="command", label="加载记录 2", command=f"/load_history {record_2['id']}"),
+            ChatAction(type="command", label="深入分析记录 1", command=f"/deep_dive {record_1['id']}"),
+            ChatAction(type="command", label="深入分析记录 2", command=f"/deep_dive {record_2['id']}"),
+            ChatAction(type="link", label="打开历史记录", href="/history"),
+        ],
+        references=refs,
+        meta={"record_id_1": record_1["id"], "record_id_2": record_2["id"], "blocks": blocks},
+    )
+
+
+def run_deep_dive(args: ToolDeepDiveArgs) -> ChatMessage:
+    """深入分析某一焦点领域。"""
+    record = get_history(args.record_id)
+    if not record:
+        return ChatMessage(
+            role="assistant",
+            content=f"未找到历史记录：{args.record_id}",
+            actions=[ChatAction(type="link", label="打开历史记录", href="/history")],
+            references=[],
+        )
+
+    report = record.get("report") or {}
+    detect_data = record.get("detect_data") or {}
+    claim_reports = report.get("claim_reports") or []
+    focus = args.focus or "general"
+
+    lines: list[str] = []
+    lines.append(f"=== 深入分析 ({focus}) ===")
+    lines.append(f"record_id: {record['id']}")
+    lines.append("")
+
+    blocks: list[dict[str, Any]] = []
+
+    if focus in ("general", "evidence"):
+        lines.append("【证据深度分析】")
+        lines.append(f"- 对齐证据总数: {sum(len(cr.get('evidences', [])) for cr in claim_reports)}")
+
+        stance_counts: dict[str, int] = {"support": 0, "oppose": 0, "insufficient_evidence": 0}
+        source_urls: list[str] = []
+
+        for cr in claim_reports:
+            for ev in cr.get("evidences", []):
+                stance = ev.get("stance", "insufficient_evidence")
+                if stance in stance_counts:
+                    stance_counts[stance] += 1
+                url = ev.get("url")
+                if url and url.startswith("http"):
+                    source_urls.append(url)
+
+        lines.append(f"- 证据立场分布:")
+        lines.append(f"  - 支持: {stance_counts['support']}")
+        lines.append(f"  - 反对: {stance_counts['oppose']}")
+        lines.append(f"  - 证据不足: {stance_counts['insufficient_evidence']}")
+        lines.append(f"- 来源链接数: {len(set(source_urls))}")
+        lines.append("")
+
+        blocks.append({
+            "kind": "evidence_stats",
+            "title": "证据统计",
+            "stance_distribution": stance_counts,
+            "unique_sources": len(set(source_urls)),
+        })
+
+    if focus in ("general", "claims") and claim_reports:
+        lines.append("【主张分析】")
+        target_claims = claim_reports
+        if args.claim_index is not None and 0 <= args.claim_index < len(claim_reports):
+            target_claims = [claim_reports[args.claim_index]]
+            lines.append(f"- 聚焦主张 #{args.claim_index}")
+
+        for idx, cr in enumerate(target_claims):
+            claim_text = (cr.get("claim") or {}).get("claim_text", "")[:80]
+            verdict = cr.get("verdict", "未知")
+            evidences = cr.get("evidences", [])
+            lines.append(f"  主张 {args.claim_index if args.claim_index is not None else idx}: {claim_text}…")
+            lines.append(f"    - 结论: {verdict}")
+            lines.append(f"    - 证据数: {len(evidences)}")
+        lines.append("")
+
+        blocks.append({
+            "kind": "claims_analysis",
+            "title": "主张分析",
+            "focus_index": args.claim_index,
+            "total_claims": len(claim_reports),
+        })
+
+    if focus in ("general", "timeline"):
+        lines.append("【时间线】")
+        lines.append(f"- 创建时间: {record.get('created_at')}")
+        lines.append(f"- 更新时间: {record.get('updated_at')}")
+        if detect_data.get("reasons"):
+            lines.append("- 风险快照触发原因:")
+            for r in detect_data.get("reasons", [])[:3]:
+                lines.append(f"  - {r}")
+        lines.append("")
+
+    if focus in ("general", "sources"):
+        lines.append("【来源追溯】")
+        seen_urls: set[str] = set()
+        for cr in claim_reports:
+            for ev in cr.get("evidences", []):
+                url = ev.get("url")
+                if url and url.startswith("http") and url not in seen_urls:
+                    seen_urls.add(url)
+                    title = ev.get("title", url)[:60]
+                    lines.append(f"  - [{title}]({url})")
+                    if len(seen_urls) >= 10:
+                        break
+            if len(seen_urls) >= 10:
+                break
+        lines.append("")
+
+    refs: list[ChatReference] = [
+        ChatReference(
+            title=f"历史记录：{record['id']}",
+            href="/history",
+            description=f"风险: {record.get('risk_label')} ({record.get('risk_score')})",
+        )
+    ]
+
+    return ChatMessage(
+        role="assistant",
+        content="\n".join(lines),
+        actions=[
+            ChatAction(type="command", label="为什么这样判定", command=f"/why {record['id']}"),
+            ChatAction(type="command", label="补充证据", command="/more_evidence"),
+            ChatAction(type="command", label="深入证据", command=f"/deep_dive {record['id']} evidence"),
+            ChatAction(type="command", label="深入主张", command=f"/deep_dive {record['id']} claims"),
+            ChatAction(type="link", label="打开检测结果", href="/result"),
+        ],
+        references=refs,
+        meta={"record_id": record["id"], "focus": focus, "blocks": blocks},
+    )
 

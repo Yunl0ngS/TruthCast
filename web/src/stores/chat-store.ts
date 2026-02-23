@@ -34,9 +34,12 @@ interface ChatState {
   session_id: string;
   messages: ChatMessage[];
   is_streaming: boolean;
+  is_initialized: boolean;
+  boundRecordId: string | null;
   setStreaming: (value: boolean) => void;
   setSessionId: (sessionId: string) => void;
   setMessages: (messages: ChatMessage[]) => void;
+  setBoundRecordId: (recordId: string | null) => void;
   addMessage: (
     role: ChatRole,
     content: string,
@@ -47,7 +50,9 @@ interface ChatState {
     patch: Partial<Pick<ChatMessage, 'content' | 'actions' | 'references' | 'meta'>>
   ) => void;
   appendToMessage: (id: string, delta: string) => void;
+  loadSession: (sessionId: string, messages: ChatMessage[]) => void;
   reset: () => void;
+  markInitialized: () => void;
 }
 
 function newSessionId() {
@@ -65,8 +70,7 @@ export const useChatStore = create<ChatState>((set) => ({
       id: newMessageId(),
       role: 'assistant',
       content:
-        '这里是“对话工作台”首版：支持用命令快速驱动现有分析流水线。\n\n- 直接输入待分析文本并发送：会自动启动分析\n- 或使用 /analyze <文本>\n- /retry_failed 重试失败阶段\n- /retry <phase> 例如 /retry report\n\n后续会接入后端对话编排与真正的流式回答。',
-      // 避免 Next.js 预渲染时 server/client 生成不同时间导致 hydration mismatch
+        '这里是"对话工作台"首版：支持用命令快速驱动现有分析流水线。\n\n- 直接输入待分析文本并发送：会自动启动分析\n- 或使用 /analyze <文本>\n- /retry_failed 重试失败阶段\n- /retry <phase> 例如 /retry report\n- /why <record_id> 解释判定原因\n- /compare <id1> <id2> 对比两条记录\n- /deep_dive <record_id> [focus] 深入分析\n\n后续会接入后端对话编排与真正的流式回答。',
       created_at: '1970-01-01T00:00:00.000Z',
       actions: [
         { type: 'link', label: '打开检测结果', href: '/result' },
@@ -77,9 +81,12 @@ export const useChatStore = create<ChatState>((set) => ({
     },
   ],
   is_streaming: false,
+  is_initialized: false,
+  boundRecordId: null,
   setStreaming: (value) => set({ is_streaming: value }),
   setSessionId: (sessionId) => set({ session_id: sessionId }),
   setMessages: (messages) => set({ messages }),
+  setBoundRecordId: (recordId) => set({ boundRecordId: recordId }),
   addMessage: (role, content, extra) => {
     const id = newMessageId();
     set((state) => ({
@@ -104,11 +111,19 @@ export const useChatStore = create<ChatState>((set) => ({
     set((state) => ({
       messages: state.messages.map((m) => (m.id === id ? { ...m, content: m.content + delta } : m)),
     })),
+  loadSession: (sessionId, messages) =>
+    set({
+      session_id: sessionId,
+      messages,
+      is_initialized: true,
+    }),
   reset: () =>
     set({
       session_id: newSessionId(),
       messages: [],
       is_streaming: false,
+      is_initialized: false,
+      boundRecordId: null,
     }),
+  markInitialized: () => set({ is_initialized: true }),
 }));
-

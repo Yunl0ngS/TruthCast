@@ -50,5 +50,5 @@ my_plans/
 
 .kilocode/
 
-# AGENTS.md 为项目进度与协作约定文档，需纳入版本控制
+AGENTS.md
 GEMINI.md

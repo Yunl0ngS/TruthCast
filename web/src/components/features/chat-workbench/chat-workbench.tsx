@@ -36,7 +36,7 @@ function parseLoadHistoryRecordId(input: string): string | null {
 }
 
 export function ChatWorkbench() {
-  const {
+const {
     session_id,
     setSessionId,
     messages,
@@ -46,6 +46,8 @@ export function ChatWorkbench() {
     updateMessage,
     appendToMessage,
     setMessages,
+    boundRecordId,
+    setBoundRecordId,
   } = useChatStore();
   const {
     taskId,
@@ -273,7 +275,7 @@ export function ChatWorkbench() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages]);
 
-  // V2：优先创建后端会话（独立会话DB）。失败时不阻塞：仍可回退到旧 /chat/stream。
+// V2：优先创建后端会话（独立会话DB）。失败时不阻塞：仍可回退到旧 /chat/stream。
   const bootstrappedSessionRef = useRef(false);
   useEffect(() => {
     if (bootstrappedSessionRef.current) return;
@@ -286,13 +288,17 @@ export function ChatWorkbench() {
           // 约定：chat 会话的 session_id 作为 pipeline-state 的 task_id
           setTaskId(s.session_id);
           // 若数据库里已有该 task_id 的快照，则按需恢复（静默，不打 toast）
-          hydrateFromLatest({ taskId: s.session_id, silent: true, force: true });
+          return hydrateFromLatest({ taskId: s.session_id, silent: true, force: true });
         }
+      })
+      .then(() => {
+        // 恢复完成后，同步 prevPhasesRef，避免后续 useEffect 误触发消息
+        prevPhasesRef.current = { ...phases };
       })
       .catch((err) => {
         console.warn('[chat] create session failed, fallback to legacy stream:', err);
       });
-  }, [hydrateFromLatest, setSessionId, setTaskId]);
+  }, [hydrateFromLatest, setSessionId, setTaskId, phases]);
 
   // 将 pipeline 各阶段产物“回灌”到对话区：当阶段从 running -> done/failed 时追加一条 assistant 消息。
   // 注意：pipeline-store 负责模块化结果；chat-store 不会自动订阅，因此需要在 UI 层桥接。
@@ -313,7 +319,8 @@ export function ChatWorkbench() {
     const emit = (phase: Phase, status: string) => {
       // 只在阶段完成或失败时提示，避免 idle/running 噪音
       if (status !== 'done' && status !== 'failed') return;
-      if (prev[phase] === status) return;
+      // 必须是从 running -> done/failed 的转换，避免恢复历史状态时误触发
+      if (prev[phase] !== 'running') return;
 
       switch (phase) {
         case 'detect': {
@@ -398,6 +405,9 @@ export function ChatWorkbench() {
           return;
         }
         case 'report': {
+          if (status === 'done' && recordId) {
+            setBoundRecordId(recordId);
+          }
           const id = addMessage(
             'assistant',
             status === 'done' ? '综合报告已完成（结果卡片如下）' : '综合报告失败（结果卡片如下）'
@@ -463,6 +473,7 @@ export function ChatWorkbench() {
     report?.risk_score,
     taskId,
     text,
+    setBoundRecordId,
   ]);
 
   const quickActions = useMemo(
@@ -475,6 +486,7 @@ export function ChatWorkbench() {
             .then((s) => {
               setSessionId(s.session_id);
               setMessages([]);
+              setBoundRecordId(null);
               addMessage('assistant', `已创建新会话：${s.session_id}`);
             })
             .catch((err) => {
@@ -556,7 +568,7 @@ export function ChatWorkbench() {
         },
       },
     ],
-    [addMessage, interruptPipeline, isPipelineRunning, retryFailed, runPipeline, setMessages, setSessionId, text]
+    [addMessage, interruptPipeline, isPipelineRunning, retryFailed, runPipeline, setMessages, setSessionId, setBoundRecordId, text]
   );
 
   const handleScroll = () => {
@@ -601,7 +613,8 @@ export function ChatWorkbench() {
       try {
         const detail = await getHistoryDetail(loadHistoryRecordId);
         loadFromHistory(detail);
-        addMessage('assistant', '已加载到前端上下文，可直接打开结果页查看。', {
+        setBoundRecordId(loadHistoryRecordId);
+        addMessage('assistant', `已加载到前端上下文（当前绑定: ${loadHistoryRecordId}），可直接打开结果页查看。`, {
           actions: [{ type: 'link', label: '打开检测结果', href: '/result' }],
         });
       } catch (err) {
@@ -613,11 +626,12 @@ export function ChatWorkbench() {
       return;
     }
 
-    // 0.5) /why (无参数) ：若已通过 /load_history 把历史记录加载到前端上下文，则自动补全 record_id
-    // 诉求：用户执行过 /load_history <record_id> 后，可直接输入 /why 继续追问。
+    // 0.5) /why (无参数) ：若已绑定 record_id，则自动补全
+    // 诉求：用户执行过分析或 /load_history 后，可直接输入 /why 继续追问。
     const trimmed = input.trim();
-    if ((trimmed === '/why' || trimmed === '/explain') && recordId) {
-      normalizedInput = `/why ${recordId}`;
+    const effectiveRecordId = boundRecordId || recordId;
+    if ((trimmed === '/why' || trimmed === '/explain') && effectiveRecordId) {
+      normalizedInput = `/why ${effectiveRecordId}`;
     }
 
     // 1) /analyze <text>
@@ -820,6 +834,11 @@ export function ChatWorkbench() {
         </div>
       </CardHeader>
       <CardContent className="flex flex-col flex-1 min-h-0 gap-3 overflow-y-auto pr-1 px-4">
+        {boundRecordId && (
+          <div className="text-xs text-muted-foreground bg-muted/50 rounded px-2 py-1">
+            当前绑定: <span className="font-mono">{boundRecordId}</span>
+          </div>
+        )}
         <div className="text-sm text-muted-foreground space-y-1">
           <div>风险快照：{phases.detect}</div>
           <div>主张抽取：{phases.claims}</div>
@@ -838,6 +857,7 @@ export function ChatWorkbench() {
           content={content}
           onClearContext={() => {
             reset();
+            setBoundRecordId(null);
             addMessage('assistant', '已清空前端上下文（pipeline-store）。');
           }}
           onCommand={runCommand}

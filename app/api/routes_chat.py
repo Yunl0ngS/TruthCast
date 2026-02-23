@@ -6,6 +6,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from app.core.concurrency import llm_slot
+from app.core.guardrails import (
+    build_guardrails_warning_message,
+    validate_tool_call,
+)
 from app.orchestrator import orchestrator
 from app.schemas.chat import (
     ChatAction,
@@ -23,6 +27,8 @@ from app.schemas.chat import (
 from app.services import chat_store
 from app.services.chat_orchestrator import (
     ToolAnalyzeArgs,
+    ToolCompareArgs,
+    ToolDeepDiveArgs,
     ToolListArgs,
     ToolLoadHistoryArgs,
     ToolMoreEvidenceArgs,
@@ -31,6 +37,8 @@ from app.services.chat_orchestrator import (
     build_help_message,
     build_why_usage_message,
     parse_tool,
+    run_compare,
+    run_deep_dive,
     run_list,
     run_load_history,
     run_more_evidence,
@@ -255,6 +263,12 @@ def chat(payload: ChatRequest) -> ChatResponse:
         },
     )
 
+    try:
+        chat_store.update_session_meta(session_id, "record_id", record_id)
+        chat_store.update_session_meta(session_id, "bound_record_id", record_id)
+    except Exception:
+        pass
+
     top_refs: list[ChatReference] = [
         ChatReference(
             title=f"历史记录已保存：{record_id}",
@@ -350,7 +364,8 @@ def chat_session_stream(session_id: str, payload: ChatMessageCreateRequest) -> S
 
     def event_generator() -> Iterator[str]:
         try:
-            tool, args_dict = parse_tool(text)
+            session_meta = chat_store.get_session_meta(session_id)
+            tool, args_dict = parse_tool(text, session_meta=session_meta)
             ctx = payload.context or {}
 
             if tool == "help":
@@ -373,6 +388,11 @@ def chat_session_stream(session_id: str, payload: ChatMessageCreateRequest) -> S
             if tool == "load_history":
                 args = ToolLoadHistoryArgs.model_validate(args_dict)
                 msg = run_load_history(args)
+                if msg.meta and msg.meta.get("record_id"):
+                    try:
+                        chat_store.update_session_meta(session_id, "bound_record_id", msg.meta["record_id"])
+                    except Exception:
+                        pass
                 try:
                     chat_store.append_message(
                         session_id,
@@ -479,6 +499,85 @@ def chat_session_stream(session_id: str, payload: ChatMessageCreateRequest) -> S
                 yield f"data: {event.model_dump_json()}\n\n"
                 yield f"data: {ChatStreamEvent(type='done', data={'session_id': session_id}).model_dump_json()}\n\n"
                 return
+
+            if tool == "compare":
+                try:
+                    args = ToolCompareArgs.model_validate(args_dict)
+                    msg = run_compare(args)
+                except ValidationError:
+                    msg = ChatMessage(
+                        role="assistant",
+                        content="用法：/compare <record_id_1> <record_id_2>\n\n"
+                        "例如：/compare rec_abc123 rec_def456",
+                        actions=[ChatAction(type="command", label="列出最近记录", command="/list")],
+                        references=[],
+                    )
+                try:
+                    chat_store.append_message(
+                        session_id,
+                        role="assistant",
+                        content=msg.content,
+                        actions=[a.model_dump() for a in msg.actions],
+                        references=[r.model_dump() for r in msg.references],
+                        meta=msg.meta,
+                    )
+                except Exception:
+                    pass
+                event = ChatStreamEvent(type="message", data={"session_id": session_id, "message": msg.model_dump()})
+                yield f"data: {event.model_dump_json()}\n\n"
+                yield f"data: {ChatStreamEvent(type='done', data={'session_id': session_id}).model_dump_json()}\n\n"
+                return
+
+            if tool == "deep_dive":
+                try:
+                    if not (args_dict.get("record_id") or "").strip():
+                        args_dict["record_id"] = str(ctx.get("record_id") or ctx.get("recordId") or "")
+                    args = ToolDeepDiveArgs.model_validate(args_dict)
+                    msg = run_deep_dive(args)
+                except ValidationError:
+                    msg = ChatMessage(
+                        role="assistant",
+                        content="用法：/deep_dive <record_id> [focus] [claim_index]\n\n"
+                        "- focus 可选：general（默认）/evidence/claims/timeline/sources\n"
+                        "- claim_index：指定深入分析第几条主张（从0开始）\n\n"
+                        "例如：/deep_dive rec_abc123 evidence",
+                        actions=[ChatAction(type="command", label="列出最近记录", command="/list")],
+                        references=[],
+                    )
+                try:
+                    chat_store.append_message(
+                        session_id,
+                        role="assistant",
+                        content=msg.content,
+                        actions=[a.model_dump() for a in msg.actions],
+                        references=[r.model_dump() for r in msg.references],
+                        meta=msg.meta,
+                    )
+                except Exception:
+                    pass
+                event = ChatStreamEvent(type="message", data={"session_id": session_id, "message": msg.model_dump()})
+                yield f"data: {event.model_dump_json()}\n\n"
+                yield f"data: {ChatStreamEvent(type='done', data={'session_id': session_id}).model_dump_json()}\n\n"
+                return
+
+            validation = validate_tool_call(tool, args_dict)
+            if not validation.is_valid:
+                msg = ChatMessage(
+                    role="assistant",
+                    content=f"参数校验失败：\n- " + "\n- ".join(validation.errors) + "\n\n请检查输入后重试。",
+                    actions=[ChatAction(type="command", label="查看帮助", command="/help")],
+                    references=[],
+                )
+                event = ChatStreamEvent(type="message", data={"session_id": session_id, "message": msg.model_dump()})
+                yield f"data: {event.model_dump_json()}\n\n"
+                yield f"data: {ChatStreamEvent(type='done', data={'session_id': session_id}).model_dump_json()}\n\n"
+                return
+
+            if validation.warnings:
+                warning_prefix = build_guardrails_warning_message(validation.warnings)
+                yield f"data: {ChatStreamEvent(type='token', data={'content': warning_prefix, 'session_id': session_id}).model_dump_json()}\n\n"
+
+            args_dict = validation.args
 
             # tool == analyze
             args = ToolAnalyzeArgs.model_validate(args_dict)
@@ -621,6 +720,12 @@ def chat_session_stream(session_id: str, payload: ChatMessageCreateRequest) -> S
                     "reasons": risk.reasons,
                 },
             )
+
+            try:
+                chat_store.update_session_meta(session_id, "record_id", record_id)
+                chat_store.update_session_meta(session_id, "bound_record_id", record_id)
+            except Exception:
+                pass
 
             phases_state["report"] = "done"
             upsert_phase_snapshot(
