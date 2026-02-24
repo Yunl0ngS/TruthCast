@@ -10,6 +10,25 @@ import typer
 from app.cli.client import APIClient, APIError
 from app.cli._globals import get_global_config
 
+# Detect if console supports unicode/emoji
+def _supports_unicode() -> bool:
+    """Check if console supports unicode output."""
+    try:
+        # Try encoding a test emoji
+        "\u2705".encode(sys.stdout.encoding or 'utf-8')
+        return True
+    except (UnicodeEncodeError, LookupError):
+        return False
+
+
+_UNICODE_SUPPORT = _supports_unicode()
+
+
+def _emoji(unicode_char: str, ascii_fallback: str) -> str:
+    """Return emoji if supported, otherwise ASCII fallback."""
+    return unicode_char if _UNICODE_SUPPORT else ascii_fallback
+
+
 history_app = typer.Typer(help="Manage analysis history records")
 
 
@@ -25,13 +44,13 @@ def _format_timestamp(ts: str) -> str:
 def _format_score(label: str, score: int) -> str:
     """Format risk label with score."""
     if label == "可信":
-        icon = "✅"
+        icon = _emoji('✅', '[OK]')
     elif label == "可疑":
-        icon = "⚠️"
+        icon = _emoji('⚠️', '[WARN]')
     elif label == "高风险":
-        icon = "🔴"
+        icon = _emoji('🔴', '[CRITICAL]')
     else:
-        icon = "❓"
+        icon = _emoji('❓', '[UNKNOWN]')
     return f"{icon} {label}({score})"
 
 
@@ -76,10 +95,10 @@ def list_history(
         items = data.get("items", [])
         
         if not items:
-            typer.echo("📭 暂无历史分析记录")
+            typer.echo(_emoji('📭', '[EMPTY]') + " 暂无历史分析记录")
             return
         
-        typer.echo(f"\n📋 历史分析记录 (最近{len(items)}条)\n")
+        typer.echo(f"\n{_emoji('📋', '[LIST]')} 历史分析记录 (最近{len(items)}条)\n")
         typer.echo(f"{'序号':<4} {'Record ID':<15} {'时间':<16} {'风险评估':<15} {'摘要'}")
         typer.echo("-" * 100)
         
@@ -96,14 +115,14 @@ def list_history(
             )
         
         typer.echo()
-        typer.echo("💡 提示: 使用 'truthcast history show <record_id>' 查看详情")
-        typer.echo(f"        使用 'truthcast state bind <record_id>' 绑定记录 ID\n")
+        typer.echo(_emoji('💡', '[TIP]') + " 提示: 使用 'truthcast history show <record_id>' 查看详情")
+        typer.echo(_emoji('💡', '[TIP]') + " 提示: 使用 'truthcast state bind <record_id>' 绑定记录 ID\n")
         
     except APIError as e:
         typer.echo(f"\n{e.user_friendly_message()}", err=True)
         sys.exit(1)
     except Exception as e:
-        typer.echo(f"\n❌ 未知错误: {e}", err=True)
+        typer.echo(f"\n{_emoji('❌', '[ERROR]')} 未知错误: {e}", err=True)
         sys.exit(1)
 
 
@@ -146,7 +165,7 @@ def show_history(
     except APIError as e:
         if e.status_code == 404:
             typer.echo(
-                f"\n❌ 记录不存在: {record_id}\n\n"
+                f"\n{_emoji('❌', '[ERROR]')} 记录不存在: {record_id}\n\n"
                 f"请检查 record_id 是否正确，或使用 'truthcast history list' 查看所有记录。\n",
                 err=True,
             )
@@ -154,7 +173,7 @@ def show_history(
             typer.echo(f"\n{e.user_friendly_message()}", err=True)
         sys.exit(1)
     except Exception as e:
-        typer.echo(f"\n❌ 未知错误: {e}", err=True)
+        typer.echo(f"\n{_emoji('❌', '[ERROR]')} 未知错误: {e}", err=True)
         sys.exit(1)
 
 
@@ -168,7 +187,7 @@ def _print_history_detail(data: dict) -> None:
     domains = data.get("evidence_domains", [])
     feedback = data.get("feedback_status", "未反馈")
     
-    typer.echo(f"\n📊 分析记录详情\n")
+    typer.echo(f"\n{_emoji('📊', '[DETAIL]')} 分析记录详情\n")
     typer.echo(f"  Record ID:     {record_id}")
     typer.echo(f"  时间:         {created_at}")
     typer.echo(f"  风险评估:      {_format_score(risk_label, risk_score)}")
@@ -211,7 +230,7 @@ def _print_history_detail(data: dict) -> None:
             top_emotion = max(emotion.items(), key=lambda x: x[1]) if emotion else ("无", 0)
             typer.echo(f"    主导情绪: {top_emotion[0]} ({top_emotion[1]:.0%})")
     
-    typer.echo(f"\n💡 提示: 使用 --json 选项查看完整数据\n")
+    typer.echo(f"\n{_emoji('💡', '[TIP]')} 提示: 使用 --json 选项查看完整数据\n")
 
 
 def history(
@@ -252,13 +271,13 @@ def history(
         list_history(limit=limit)
     elif action == "show":
         if not record_id:
-            typer.echo("❌ 错误: 'show' 操作需要提供 record_id\n", err=True)
+            typer.echo(_emoji('❌', '[ERROR]') + " 错误: 'show' 操作需要提供 record_id\n", err=True)
             typer.echo("用法: truthcast history show <record_id>", err=True)
             sys.exit(1)
         show_history(record_id=record_id, json_output=json_output)
     else:
         typer.echo(
-            f"❌ 未知操作: {action}\n\n"
+            f"{_emoji('❌', '[ERROR]')} 未知操作: {action}\n\n"
             f"支持的操作: list, show\n",
             err=True,
         )

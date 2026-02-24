@@ -16,7 +16,7 @@ def _format_emotion_stage(data: dict[str, Any]) -> None:
     stance_dist = data.get("stance_distribution", {})
     
     typer.echo("\n" + "="*60)
-    typer.echo("📊 第一阶段：情绪与立场分析 (Emotion & Stance Analysis)")
+    typer.echo("[STAGE 1] 第一阶段：情绪与立场分析 (Emotion & Stance Analysis)")
     typer.echo("="*60)
     
     if emotion_dist:
@@ -43,7 +43,7 @@ def _format_narratives_stage(data: dict[str, Any]) -> None:
     narratives = data.get("narratives", [])
     
     typer.echo("\n" + "="*60)
-    typer.echo("📖 第二阶段：叙事分支生成 (Narrative Branch Generation)")
+    typer.echo("[STAGE 2] 第二阶段：叙事分支生成 (Narrative Branch Generation)")
     typer.echo("="*60)
     
     if narratives:
@@ -67,7 +67,7 @@ def _format_flashpoints_stage(data: dict[str, Any]) -> None:
     flashpoints = data.get("flashpoints", [])
     
     typer.echo("\n" + "="*60)
-    typer.echo("⚡ 第三阶段：引爆点识别 (Flashpoint Identification)")
+    typer.echo("[STAGE 3] 第三阶段：引爆点识别 (Flashpoint Identification)")
     typer.echo("="*60)
     
     if flashpoints:
@@ -88,7 +88,7 @@ def _format_suggestion_stage(data: dict[str, Any]) -> None:
     suggestion = data.get("suggestion", {})
     
     typer.echo("\n" + "="*60)
-    typer.echo("💡 第四阶段：应对建议 (Mitigation Suggestions)")
+    typer.echo("[STAGE 4] 第四阶段：应对建议 (Mitigation Suggestions)")
     typer.echo("="*60)
     
     if suggestion.get("summary"):
@@ -156,7 +156,7 @@ def simulate(
         state = load_state()
         record = state.get("bound_record_id")
         if not record:
-            typer.echo("❌ 缺少 record_id. 用法: truthcast simulate --record <record_id>", err=True)
+            typer.echo("[ERROR] 缺少 record_id. 用法: truthcast simulate --record <record_id>", err=True)
             typer.echo("   或先用 'truthcast bind <record_id>' 绑定默认记录", err=True)
             raise typer.Exit(code=1)
     
@@ -171,7 +171,7 @@ def simulate(
         history_detail = client.get(f"/history/{record}")
     except APIError as e:
         if e.status_code == 404:
-            typer.echo(f"❌ 记录不存在: {record}", err=True)
+            typer.echo(f"[ERROR] 记录不存在: {record}", err=True)
         else:
             typer.echo(e.user_friendly_message(), err=True)
         raise typer.Exit(code=1)
@@ -190,7 +190,7 @@ def simulate(
     if stream:
         # SSE streaming mode
         if not json_output:
-            typer.echo(f"🔄 正在流式输出舆情预演结果... (record_id: {record})")
+            typer.echo(f"[STREAM] 正在流式输出舆情预演结果... (record_id: {record})")
             typer.echo("Press Ctrl+C to cancel\n")
         
         try:
@@ -202,7 +202,7 @@ def simulate(
             ) as response:
                 
                 if response.status_code != 200:
-                    typer.echo(f"❌ 舆情预演失败: HTTP {response.status_code}", err=True)
+                    typer.echo(f"[ERROR] 舆情预演失败: HTTP {response.status_code}", err=True)
                     raise typer.Exit(code=1)
                 
                 # Parse SSE stream
@@ -246,34 +246,34 @@ def simulate(
                                     # Final stage: add separator
                                     if not json_output:
                                         typer.echo("\n" + "="*60)
-                                        typer.echo("✅ 舆情预演完成 (Complete)")
+                                        typer.echo("[SUCCESS] 舆情预演完成 (Complete)")
                                         typer.echo("="*60 + "\n")
         
         except KeyboardInterrupt:
             if not json_output:
-                typer.echo("\n\n⏹️ 预演已取消 (Cancelled by user)", err=True)
+                typer.echo("\n\n[CANCELLED] 预演已取消 (Cancelled by user)", err=True)
             raise typer.Exit(code=130)
         except Exception as e:
             if not json_output:
-                typer.echo(f"❌ 流式传输错误: {str(e)}", err=True)
+                typer.echo(f"[ERROR] 流式传输错误: {str(e)}", err=True)
             raise typer.Exit(code=1)
     
     else:
         # Non-streaming mode (fetch complete result)
         if not json_output:
-            typer.echo(f"🔄 正在生成舆情预演结果... (record_id: {record})")
+            typer.echo(f"[LOADING] 正在生成舆情预演结果... (record_id: {record})")
         try:
             result = client.post("/simulate", json=payload)
             
             if json_output:
                 typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
             else:
-                typer.echo("\n✅ 舆情预演完成")
+                typer.echo("\n[SUCCESS] 舆情预演完成")
                 typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
         
         except APIError as e:
             typer.echo(e.user_friendly_message(), err=True)
             raise typer.Exit(code=1)
         except Exception as e:
-            typer.echo(f"❌ 舆情预演失败: {str(e)}", err=True)
+            typer.echo(f"[ERROR] 舆情预演失败: {str(e)}", err=True)
             raise typer.Exit(code=1)
