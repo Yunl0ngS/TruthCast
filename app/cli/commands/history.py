@@ -8,8 +8,7 @@ from typing import Optional
 import typer
 
 from app.cli.client import APIClient, APIError
-from app.cli.config import get_config
-from app.cli.lib.state_manager import update_state
+from app.cli._globals import get_global_config
 
 history_app = typer.Typer(help="Manage analysis history records")
 
@@ -66,7 +65,7 @@ def list_history(
         truthcast history list
         truthcast history list --limit 20
     """
-    config = get_config()
+    config = get_global_config()
     client = APIClient(base_url=config.api_base, timeout=config.timeout, retry_times=config.retry_times)
     
     try:
@@ -98,7 +97,7 @@ def list_history(
         
         typer.echo()
         typer.echo("💡 提示: 使用 'truthcast history show <record_id>' 查看详情")
-        typer.echo(f"        使用 'truthcast bind <record_id>' 绑定记录 ID\n")
+        typer.echo(f"        使用 'truthcast state bind <record_id>' 绑定记录 ID\n")
         
     except APIError as e:
         typer.echo(f"\n{e.user_friendly_message()}", err=True)
@@ -129,7 +128,7 @@ def show_history(
         truthcast history show rec_abc123
         truthcast history show rec_abc123 --json
     """
-    config = get_config()
+    config = get_global_config()
     client = APIClient(base_url=config.api_base, timeout=config.timeout, retry_times=config.retry_times)
     
     try:

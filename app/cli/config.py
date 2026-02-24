@@ -26,6 +26,7 @@ class CLIConfig:
     timeout: int = 30  # seconds
     output_format: Literal["text", "json"] = "text"
     retry_times: int = 3
+    local_agent: bool = False
 
     def to_dict(self) -> dict:
         """Convert to dictionary (safe for display, no secrets)."""
@@ -34,6 +35,7 @@ class CLIConfig:
             "timeout": self.timeout,
             "output_format": self.output_format,
             "retry_times": self.retry_times,
+            "local_agent": self.local_agent,
         }
 
 
@@ -109,6 +111,7 @@ def get_config(
     timeout: Optional[int] = None,
     output_format: Optional[Literal["text", "json"]] = None,
     retry_times: Optional[int] = None,
+    local_agent: Optional[bool] = None,
 ) -> CLIConfig:
     """
     Build CLI configuration with priority: CLI flag > env > default.
@@ -127,4 +130,5 @@ def get_config(
         timeout=timeout or get_timeout_from_env(),
         output_format=output_format or get_output_format_from_env(),
         retry_times=retry_times or get_retry_times_from_env(),
+        local_agent=bool(local_agent) if local_agent is not None else False,
     )

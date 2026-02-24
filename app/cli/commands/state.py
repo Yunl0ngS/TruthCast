@@ -79,7 +79,7 @@ def clear_state(
 def state(
     action: str = typer.Argument(
         "show",
-        help="Action: bind, show, clear",
+        help="Action: bind, show, clear, reset",
     ),
     record_id: Optional[str] = typer.Argument(
         None,
@@ -91,12 +91,13 @@ def state(
     This command handles local state management, including:
     - bind: Bind a record_id for convenient access
     - show: Display current state
-    - clear: Clear all state
+    - clear/reset: Clear all state
     
     Examples:
         truthcast state bind rec_abc123
         truthcast state show
         truthcast state clear
+        truthcast state reset
     """
     if action == "bind":
         if not record_id:
@@ -106,12 +107,12 @@ def state(
         bind_record(record_id=record_id)
     elif action == "show":
         show_state()
-    elif action == "clear":
+    elif action in {"clear", "reset"}:
         clear_state()
     else:
         typer.echo(
             f"❌ 未知操作: {action}\n\n"
-            f"支持的操作: bind, show, clear\n",
+            f"支持的操作: bind, show, clear, reset\n",
             err=True,
         )
         sys.exit(1)

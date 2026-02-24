@@ -3,13 +3,13 @@
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 import typer
 
 from app.cli.client import APIClient, APIError
 from app.cli.lib.state_manager import update_state
-from app.cli.config import get_config
+from app.cli._globals import get_global_config
 
 
 # Detect if console supports unicode/emoji
@@ -135,35 +135,81 @@ def _format_text_output(result: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def run_analysis_pipeline(
+    client: APIClient,
+    text: str,
+    *,
+    on_stage: Callable[[str], None] | None = None,
+) -> Dict[str, Any]:
+    """Run the backend analysis pipeline and return all intermediate outputs."""
+
+    def _stage(name: str) -> None:
+        if on_stage is not None:
+            on_stage(name)
+
+    _stage("risk")
+    detect_result = client.post("/detect", json={"text": text})
+
+    _stage("claims")
+    claims_result = client.post("/detect/claims", json={"text": text})
+    claims = claims_result.get("claims", [])
+
+    _stage("evidence")
+    evidence_result = client.post(
+        "/detect/evidence",
+        json={"text": text, "claims": claims},
+    )
+    evidences = evidence_result.get("evidences", [])
+
+    _stage("report")
+    report_result = client.post(
+        "/detect/report",
+        json={
+            "text": text,
+            "claims": claims,
+            "evidences": evidences,
+            "detect_data": {
+                "label": detect_result.get("label"),
+                "confidence": detect_result.get("confidence"),
+                "score": detect_result.get("score"),
+                "reasons": detect_result.get("reasons"),
+            },
+        },
+    )
+
+    return {
+        "detect": detect_result,
+        "claims": claims_result,
+        "evidence": evidence_result,
+        "report": report_result,
+    }
+
+
 def analyze(
     file: Optional[str] = typer.Option(
         None,
         "-f",
         "--file",
-        help="输入文件路径 (不指定则从 stdin 读取)",
+        help="Input file path (if omitted, read from stdin)",
     ),
 ) -> None:
     """
-    分析文本可信度 (完整流水线).
-    
-    执行完整分析流程:
-    - 风险快照 (可信度评估)
-    - 主张抽取
-    - 证据检索
-    - 证据对齐
-    - 综合报告生成
-    
-    默认输出人类可读格式,使用 --json 输出 JSON 格式.
-    
-    示例:
-    
+    Run the full analysis pipeline.
+
+    Steps:
+    - Risk snapshot (/detect)
+    - Claims extraction (/detect/claims)
+    - Evidence retrieval (/detect/evidence)
+    - Report generation (/detect/report)
+
+    Output defaults to human-readable text; use global `--json` for JSON.
+
+    Examples:
       truthcast analyze -f news.txt
-      
       cat news.txt | truthcast analyze
-      
       truthcast --json analyze -f news.txt
     """
-    config = get_config()
+    config = get_global_config()
     
     # Read input
     try:
@@ -183,43 +229,20 @@ def analyze(
     )
     
     try:
-        # Step 1: Risk snapshot (detect)
-        if config.output_format != "json":
-            typer.echo(f"{_emoji('🔍', '[1/4]')} 正在分析风险...", err=True)
-        detect_result = client.post("/detect", json={"text": text})
-        
-        # Step 2: Extract claims
-        if config.output_format != "json":
-            typer.echo(f"{_emoji('📋', '[2/4]')} 正在抽取主张...", err=True)
-        claims_result = client.post("/detect/claims", json={"text": text})
-        claims = claims_result.get("claims", [])
-        
-        # Step 3: Retrieve evidence
-        if config.output_format != "json":
-            typer.echo(f"{_emoji('🔎', '[3/4]')} 正在检索证据...", err=True)
-        evidence_result = client.post(
-            "/detect/evidence",
-            json={"text": text, "claims": claims},
-        )
-        evidences = evidence_result.get("evidences", [])
-        
-        # Step 4: Generate report
-        if config.output_format != "json":
-            typer.echo(f"{_emoji('📊', '[4/4]')} 正在生成报告...", err=True)
-        report_result = client.post(
-            "/detect/report",
-            json={
-                "text": text,
-                "claims": claims,
-                "evidences": evidences,
-                "detect_data": {
-                    "label": detect_result.get("label"),
-                    "confidence": detect_result.get("confidence"),
-                    "score": detect_result.get("score"),
-                    "reasons": detect_result.get("reasons"),
-                },
-            },
-        )
+        def _on_stage(stage: str) -> None:
+            if config.output_format == "json":
+                return
+            if stage == "risk":
+                typer.echo(f"{_emoji('🔍', '[1/4]')} 正在分析风险...", err=True)
+            elif stage == "claims":
+                typer.echo(f"{_emoji('📋', '[2/4]')} 正在抽取主张...", err=True)
+            elif stage == "evidence":
+                typer.echo(f"{_emoji('🔎', '[3/4]')} 正在检索证据...", err=True)
+            elif stage == "report":
+                typer.echo(f"{_emoji('📊', '[4/4]')} 正在生成报告...", err=True)
+
+        outputs = run_analysis_pipeline(client, text, on_stage=_on_stage)
+        report_result = outputs["report"]
         
         # Save record_id to state if present
         record_id = report_result.get("record_id")
@@ -230,7 +253,7 @@ def analyze(
         # Output result
         if config.output_format == "json":
             # JSON output to stdout
-            print(json.dumps(report_result, ensure_ascii=False, indent=2))
+            print(json.dumps(report_result, ensure_ascii=True, indent=2))
         else:
             # Human-readable text output
             output = _format_text_output(report_result)

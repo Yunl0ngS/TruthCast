@@ -17,9 +17,10 @@ from app.core.env_loader import load_project_env
 load_project_env()
 
 # Now safe to import the rest
-from app.cli.commands import analyze, chat, content, export, history, simulate, state
+from app.cli.commands import analyze, chat, content, export, history, repl, simulate, state
 from app.cli.config import get_config
 from app.cli._globals import set_global_config, get_global_config
+from app.cli.lib.state_manager import update_state
 
 # Global configuration object (set by callback)
 
@@ -43,6 +44,11 @@ def config_callback(
         help="Request timeout in seconds. Overrides TRUTHCAST_CLI_TIMEOUT env var.",
         envvar="TRUTHCAST_CLI_TIMEOUT",
     ),
+    local_agent: bool = typer.Option(
+        False,
+        "--local-agent",
+        help="Run `repl` with a local LLM agent (OpenAI-compatible).",
+    ),
 ) -> None:
     """Global options callback. Sets configuration for all commands."""
     output_format = "json" if json_output else None
@@ -50,8 +56,19 @@ def config_callback(
         api_base=api_base,
         timeout=timeout,
         output_format=output_format,  # type: ignore
+        local_agent=local_agent,
     )
     set_global_config(config)
+
+    # Best-effort persistence for convenience
+    try:
+        update_state("last_api_base", config.api_base)
+        update_state("last_timeout", config.timeout)
+        update_state("last_retry_times", config.retry_times)
+        update_state("last_output_format", config.output_format)
+        update_state("last_local_agent", config.local_agent)
+    except Exception:
+        pass
 
 
 app = typer.Typer(
@@ -63,11 +80,12 @@ app = typer.Typer(
 
 # Register command groups
 app.command()(chat.chat)
+app.command(name="repl")(repl.repl)
 app.command()(analyze.analyze)
 app.command()(simulate.simulate)
 app.command()(history.history)
 app.command()(content.content)
-app.command()(export.export_cmd)
+app.command(name="export")(export.export_cmd)
 app.command()(state.state)
 
 

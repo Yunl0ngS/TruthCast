@@ -7,7 +7,7 @@ from typing import Optional
 from pathlib import Path
 
 from app.cli.client import APIClient, APIError
-from app.cli.config import get_config
+from app.cli._globals import get_global_config
 
 logger = logging.getLogger(__name__)
 
@@ -129,9 +129,7 @@ def content(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON instead of human-readable format"),
 ) -> None:
     """Generate response content (clarification statements, FAQ, platform-specific scripts)."""
-    
-    from app.cli.main import get_global_config
-    
+
     try:
         config = get_global_config()
         client = APIClient(base_url=config.api_base, timeout=config.timeout, retry_times=config.retry_times)
