@@ -99,10 +99,10 @@ def main() -> None:
     try:
         app()
     except KeyboardInterrupt:
-        print("\n[✓] Aborted by user.", file=sys.stderr)
+        print("\n[ABORTED] Aborted by user.", file=sys.stderr)
         sys.exit(0)
     except Exception as e:
-        print(f"\n[✗] Error: {e}", file=sys.stderr)
+        print(f"\n[ERROR] Error: {e}", file=sys.stderr)
         sys.exit(1)
 
 

@@ -10,9 +10,10 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Generator, Optional
 
+import httpx
 import typer
 
-from app.cli.client import APIClient, APIError
+from app.cli.client import APIClient, APIError, TimeoutError as APITimeoutError
 from app.cli.lib.state_manager import get_state_value, update_state
 from app.cli._globals import get_global_config
 
@@ -36,6 +37,125 @@ def _emoji(unicode_char: str, ascii_fallback: str) -> str:
     return unicode_char if _UNICODE_SUPPORT else ascii_fallback
 
 
+def _normalize_input_text(text: str) -> str:
+    """Normalize console input to UTF-8-safe text."""
+    if not text:
+        return text
+
+    has_surrogate = any(0xD800 <= ord(ch) <= 0xDFFF for ch in text)
+    if not has_surrogate:
+        return text
+
+    stdin_encoding = sys.stdin.encoding or "utf-8"
+    try:
+        raw = text.encode(stdin_encoding, errors="surrogateescape")
+    except Exception:
+        raw = text.encode("utf-8", errors="replace")
+
+    for encoding in ("utf-8", "gb18030", stdin_encoding):
+        try:
+            candidate = raw.decode(encoding)
+            return candidate.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+        except UnicodeDecodeError:
+            continue
+
+    return raw.decode("utf-8", errors="replace")
+
+
+def _drain_buffered_stdin_lines(max_wait_ms: int = 180) -> list[str]:
+    """Read already-buffered pasted lines from stdin without blocking for long."""
+    if not sys.stdin.isatty():
+        return []
+
+    lines: list[str] = []
+    wait_seconds = max(0.01, max_wait_ms / 1000.0)
+
+    if os.name == "nt":
+        try:
+            import msvcrt
+        except Exception:
+            return []
+
+        end_time = time.monotonic() + wait_seconds
+        current: list[str] = []
+
+        while time.monotonic() < end_time:
+            saw_input = False
+            while msvcrt.kbhit():
+                saw_input = True
+                ch = msvcrt.getwch()
+
+                if ch in {"\r", "\n"}:
+                    lines.append("".join(current))
+                    current = []
+                    end_time = time.monotonic() + wait_seconds
+                    continue
+
+                if ch in {"\x00", "\xe0"}:
+                    if msvcrt.kbhit():
+                        msvcrt.getwch()
+                    continue
+
+                if ch in {"\b", "\x7f"}:
+                    if current:
+                        current.pop()
+                    continue
+
+                current.append(ch)
+                end_time = time.monotonic() + wait_seconds
+
+            if not saw_input:
+                time.sleep(0.005)
+
+        if current:
+            lines.append("".join(current))
+        return lines
+
+    try:
+        import select
+    except Exception:
+        return []
+
+    end_time = time.monotonic() + wait_seconds
+    while time.monotonic() < end_time:
+        remaining = max(0.0, end_time - time.monotonic())
+        readable, _, _ = select.select([sys.stdin], [], [], remaining)
+        if not readable:
+            break
+
+        raw = sys.stdin.readline()
+        if raw == "":
+            break
+
+        lines.append(raw.rstrip("\r\n"))
+        end_time = time.monotonic() + wait_seconds
+
+    return lines
+
+
+def _merge_plain_text_with_buffer(first_line: str) -> tuple[str, list[str]]:
+    """Merge first plain-text line with quickly pasted following lines."""
+    merged_lines = [_normalize_input_text(first_line)]
+    pending_inputs: list[str] = []
+
+    for extra in _drain_buffered_stdin_lines():
+        normalized = _normalize_input_text(extra)
+        stripped = normalized.strip()
+
+        if not stripped:
+            merged_lines.append("")
+            continue
+
+        if stripped.startswith("/"):
+            pending_inputs.append(normalized)
+            continue
+
+        merged_lines.append(normalized)
+
+    merged_text = "\n".join(merged_lines).strip()
+    return merged_text, pending_inputs
+
+
 
 def parse_sse_line(line: str) -> Optional[Dict[str, Any]]:
     """
@@ -55,10 +175,12 @@ def parse_sse_line(line: str) -> Optional[Dict[str, Any]]:
     
     # Strip "data: " prefix
     json_str = line[5:].strip()
+    # Normalize potential surrogate chars from terminal/stream decoding.
+    json_str = json_str.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
     
     try:
         return json.loads(json_str)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeEncodeError, ValueError):
         return None
 
 
@@ -85,11 +207,17 @@ def stream_chat_message(
         with ctx_mgr as response:
             for line in response.iter_lines():
                 if isinstance(line, bytes):
-                    line = line.decode("utf-8")
+                    line = line.decode("utf-8", errors="replace")
+                else:
+                    line = line.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
                 
                 event = parse_sse_line(line)
                 if event:
                     yield event
+    except httpx.TimeoutException as e:
+        raise APITimeoutError("SSE stream timed out while waiting for server events") from e
+    except httpx.HTTPError as e:
+        raise APIError(f"SSE stream HTTP error: {e}") from e
     except APIError:
         raise
 
@@ -156,9 +284,9 @@ def render_message(message: Dict[str, Any]) -> None:
             href = action.get("href", "")
             
             if command:
-                print(f"  • {label}: {command}")
+                print(f"  - {label}: {command}")
             elif href:
-                print(f"  • {label}: {href}")
+                print(f"  - {label}: {href}")
     
     # Print references
     if references:
@@ -168,7 +296,7 @@ def render_message(message: Dict[str, Any]) -> None:
             href = ref.get("href", "")
             description = ref.get("description", "")
             
-            print(f"  • {title}")
+            print(f"  - {title}")
             if href:
                 print(f"    {href}")
             if description:
@@ -191,6 +319,7 @@ def handle_sse_stream(
         session_id: Chat session ID
         user_input: User message text
     """
+    user_input = _normalize_input_text(user_input)
     log_fp = _open_cli_evidence_log(session_id=session_id)
 
     token_buf: str = ""
@@ -294,7 +423,7 @@ def create_session(client: APIClient) -> Optional[str]:
 
 def signal_handler(sig, frame):
     """Handle Ctrl+C gracefully."""
-    print("\n\n[✓] 已退出对话模式", file=sys.stderr)
+    print("\n\n[EXIT] 已退出对话模式", file=sys.stderr)
     sys.exit(0)
 
 
@@ -394,14 +523,15 @@ def _try_enable_readline_history() -> None:
 
 def _print_repl_help() -> None:
     print("\n[REPL 帮助]\n")
-    print("  • 单行：直接输入并回车发送")
-    print("  • 多行分析：输入 /paste 粘贴多行文本（默认作为 /analyze 发送）")
-    print("  • 多行消息：输入 /multiline 粘贴多行文本（作为普通消息发送）")
+    print("  - 单行长文本：直接输入并回车，自动按 /analyze 发起检测")
+    print("  - 粘贴多行文本：自动合并连续粘贴行后再检测")
+    print("  - 多行分析：输入 /paste 粘贴多行文本（默认作为 /analyze 发送）")
+    print("  - 多行消息：输入 /multiline 粘贴多行文本（作为普通消息发送）")
     print("    - 结束并发送：输入单独一行 '.' 或 'EOF'，或输入 /send")
     print("    - 取消：输入 /cancel")
-    print("  • 退出：/exit、quit、Ctrl+D")
-    print("  • 发送以 '/' 开头的普通文本：使用 '//' 开头（会自动去掉一个 '/'）")
-    print("  • 其他以 / 开头的命令会原样发送到后端执行（不在本地做参数校验）\n")
+    print("  - 退出：/exit、quit、Ctrl+D")
+    print("  - 发送以 '/' 开头的普通文本：使用 '//' 开头（会自动去掉一个 '/'）")
+    print("  - 其他以 / 开头的命令会原样发送到后端执行（不在本地做参数校验）\n")
 
 
 def _read_multiline_message() -> Optional[str]:
@@ -499,26 +629,41 @@ def chat(
     print("=" * 60)
     print()
     print(_emoji('💡', '[TIP]') + " 提示:")
-    print("  • 输入 /help 查看可用命令")
-    print("  • 输入 /analyze <文本> 开始分析")
-    print("  • 输入 /exit 或 quit 退出")
+    print("  - 输入 /help 查看可用命令")
+    print("  - 直接输入文本即可自动检测（等价于 /analyze <文本>）")
+    print("  - 粘贴多行文本会自动合并后检测")
+    print("  - 仍可使用 /analyze <文本> 手动触发")
+    print("  - 输入 /exit 或 quit 退出")
     print()
     print("=" * 60)
     print()
     
     # REPL loop
+    pending_inputs: list[str] = []
     while True:
         try:
             # Get user input (single-line by default)
-            raw_input = input("You: ").strip()
+            if pending_inputs:
+                raw_input = _normalize_input_text(pending_inputs.pop(0)).strip()
+                print(f"You: {raw_input}")
+            else:
+                raw_input = _normalize_input_text(input("You: ")).strip()
 
             if not raw_input:
                 continue
 
             # Exit commands (work even without leading '/')
             if raw_input.lower() in {"/exit", "quit", "exit"}:
-                print("\n[✓] 已退出对话模式")
+                print("\n[EXIT] 已退出对话模式")
                 break
+
+            # Allow sending a literal leading '/'
+            if raw_input.startswith("//"):
+                user_input = _normalize_input_text(raw_input[1:])
+                print()  # Blank line before assistant response
+                handle_sse_stream(client, session_id, user_input)
+                print()  # Blank line after response
+                continue
 
             # Local REPL commands (routing: leading '/' => command)
             if raw_input.startswith("/"):
@@ -532,29 +677,30 @@ def chat(
                     try:
                         msg = _read_multiline_message()
                     except EOFError:
-                        print("\n\n[✓] 已退出对话模式")
+                        print("\n\n[EXIT] 已退出对话模式")
                         break
 
                     if not msg:
                         continue
 
                     if cmd == "/paste":
-                        user_input = f"/analyze {msg}"
+                        user_input = f"/analyze {_normalize_input_text(msg)}"
                     else:
-                        user_input = msg
+                        user_input = _normalize_input_text(msg)
                 elif cmd == "/send":
                     # /send only makes sense inside multiline mode
                     print("\n提示: /send 用于多行输入模式的结束与发送；请先输入 /paste 或 /multiline\n")
                     continue
                 else:
                     # Forward other slash-commands to backend as-is.
-                    user_input = raw_input
+                    user_input = _normalize_input_text(raw_input)
             else:
-                # Allow sending a literal leading '/'
-                if raw_input.startswith("//"):
-                    user_input = raw_input[1:]
-                else:
-                    user_input = raw_input
+                merged_text, buffered_commands = _merge_plain_text_with_buffer(raw_input)
+                if buffered_commands:
+                    pending_inputs.extend(buffered_commands)
+
+                # Plain text is treated as analyze input by default.
+                user_input = f"/analyze {merged_text}"
 
             # Send to backend and stream response
             print()  # Blank line before assistant response
@@ -563,7 +709,7 @@ def chat(
         
         except EOFError:
             # Handle Ctrl+D (Unix) or Ctrl+Z (Windows)
-            print("\n\n[✓] 已退出对话模式")
+            print("\n\n[EXIT] 已退出对话模式")
             break
     
     # Clean exit

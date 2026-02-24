@@ -283,11 +283,22 @@ class APIClient:
         self._log_request(method, url, json=json, **kwargs)
         
         try:
+            # For SSE streams, disable read timeout by default to avoid
+            # client-side timeout between sparse server events.
+            stream_timeout = kwargs.pop("timeout", None)
+            if stream_timeout is None:
+                stream_timeout = httpx.Timeout(
+                    connect=self.timeout,
+                    read=None,
+                    write=self.timeout,
+                    pool=self.timeout,
+                )
+
             if method.upper() == "POST":
                 # Return the context manager directly; httpx.stream() is a context manager
-                ctx_mgr = self._client.stream(method, path, json=json, **kwargs)
+                ctx_mgr = self._client.stream(method, path, json=json, timeout=stream_timeout, **kwargs)
             else:
-                ctx_mgr = self._client.stream(method, path, **kwargs)
+                ctx_mgr = self._client.stream(method, path, timeout=stream_timeout, **kwargs)
             
             # Wrap the context manager to check status code on entry
             return _StreamContextWrapper(ctx_mgr)

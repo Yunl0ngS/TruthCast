@@ -9,6 +9,7 @@ Tests the chat command routing in app/cli/commands/chat.py for:
 """
 
 import pytest
+from app.cli.commands import chat as chat_cmd
 from app.cli.commands.chat import parse_sse_line
 
 
@@ -122,9 +123,22 @@ class TestCommandRouting:
             result = user_input
         
         assert result == "/analyze this as literal text"
+
+    def test_merge_plain_text_with_buffer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Plain text paste lines should merge; slash lines become pending input."""
+
+        def _fake_drain() -> list[str]:
+            return ["第二行正文", "", "/exit"]
+
+        monkeypatch.setattr(chat_cmd, "_drain_buffered_stdin_lines", _fake_drain)
+
+        merged, pending = chat_cmd._merge_plain_text_with_buffer("第一行标题")
+
+        assert merged == "第一行标题\n第二行正文"
+        assert pending == ["/exit"]
     
     def test_natural_language_input_no_processing(self) -> None:
-        """Test that natural language input is sent as-is."""
+        """Test that plain text can be transformed to analyze input."""
         inputs = [
             "Is this news fake?",
             "Analyze the following",
@@ -133,16 +147,14 @@ class TestCommandRouting:
         ]
         
         for user_input in inputs:
-            # Routing logic: if doesn't start with "/" or "//", send as-is
-            if user_input.startswith("/"):
-                # This is a command
-                pass
-            elif user_input.startswith("//"):
-                # This is an escaped slash
-                user_input = user_input[1:]
-            # else: send as-is (natural language)
-            
-            assert user_input in inputs or user_input == inputs[0][1:] or "news" in user_input.lower()
+            if user_input.startswith("//"):
+                routed = user_input[1:]
+            elif user_input.startswith("/"):
+                routed = user_input
+            else:
+                routed = f"/analyze {user_input}"
+
+            assert routed.startswith("/analyze") or routed.startswith("/")
     
     def test_command_with_arguments(self) -> None:
         """Test slash commands with arguments."""
@@ -196,8 +208,8 @@ class TestCommandRouting:
             ("/analyze news text", "forward_to_backend_as_command"),
             ("/why", "forward_to_backend_as_command"),
             ("/help", "local_help_command"),
-            ("//literal slash text", "forward_to_backend_as_command"),  # // starts with /, treated as command
-            ("Natural language text", "send_as_natural_language"),
+            ("//literal slash text", "escape_and_send_as_command"),
+            ("Natural language text", "send_as_analyze"),
             ("quit", "exit"),
             ("/exit", "exit"),
         ]
@@ -206,14 +218,14 @@ class TestCommandRouting:
             # Simulate routing logic
             if user_input.lower() in {"/exit", "quit", "exit"}:
                 decision = "exit"
+            elif user_input.startswith("//"):
+                decision = "escape_and_send_as_command"
             elif user_input.startswith("/help"):
                 decision = "local_help_command"
             elif user_input.startswith("/"):
                 decision = "forward_to_backend_as_command"
-            elif user_input.startswith("//"):
-                decision = "escape_and_send_as_natural_language"
             else:
-                decision = "send_as_natural_language"
+                decision = "send_as_analyze"
             
             assert decision == expected_decision, f"Failed for input: {user_input}"
 

@@ -1,5 +1,5 @@
 import time
-from typing import Iterator
+from typing import Any, Iterator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -51,6 +51,95 @@ from app.services.pipeline_state_store import upsert_phase_snapshot
 from app.services.risk_snapshot import detect_risk_snapshot
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+
+_RISK_LABEL_ZH = {
+    "credible": "可信",
+    "suspicious": "可疑",
+    "high_risk": "高风险",
+    "needs_context": "需要补充语境",
+    "likely_misinformation": "疑似不实信息",
+}
+
+_RISK_LEVEL_ZH = {
+    "low": "低",
+    "medium": "中",
+    "high": "高",
+    "critical": "极高",
+}
+
+_SCENARIO_ZH = {
+    "general": "通用",
+    "health": "医疗健康",
+    "governance": "政务治理",
+    "security": "公共安全",
+    "media": "媒体传播",
+    "technology": "科技产业",
+    "education": "教育校园",
+}
+
+_DOMAIN_ZH = {
+    "general": "通用",
+    "health": "医疗健康",
+    "governance": "政务治理",
+    "security": "公共安全",
+    "media": "媒体传播",
+    "technology": "科技产业",
+    "education": "教育校园",
+}
+
+_STANCE_ZH = {
+    "support": "支持",
+    "refute": "反对",
+    "oppose": "反对",
+    "insufficient": "证据不足",
+    "insufficient_evidence": "证据不足",
+}
+
+_CLAIM_SEPARATOR = "=" * 56
+_EVIDENCE_SEPARATOR = "-" * 44
+
+
+def _zh_risk_label(label: Any) -> str:
+    raw = str(label or "").strip()
+    if not raw:
+        return "未知"
+    return _RISK_LABEL_ZH.get(raw, raw)
+
+
+def _zh_risk_level(level: Any) -> str:
+    raw = str(level or "").strip()
+    if not raw:
+        return "未知"
+    return _RISK_LEVEL_ZH.get(raw, raw)
+
+
+def _zh_stance(stance: Any) -> str:
+    raw = str(stance or "").strip()
+    if not raw:
+        return "证据不足"
+    return _STANCE_ZH.get(raw, raw)
+
+
+def _zh_scenario(scenario: Any) -> str:
+    raw = str(scenario or "").strip()
+    if not raw:
+        return "未知"
+    return _SCENARIO_ZH.get(raw, raw)
+
+
+def _zh_domain(domain: Any) -> str:
+    raw = str(domain or "").strip()
+    if not raw:
+        return ""
+    return _DOMAIN_ZH.get(raw, raw)
+
+
+def _truncate_text(value: Any, limit: int = 60) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
 
 
 def _new_session_id() -> str:
@@ -288,11 +377,11 @@ def chat(payload: ChatRequest) -> ChatResponse:
 
     content = (
         "已完成一次全链路分析，并写入历史记录。\n\n"
-        f"- 风险快照: {risk.label}（score={risk.score}）\n"
+        f"- 风险快照: {_zh_risk_label(risk.label)}（score={risk.score}）\n"
         f"- 主张数: {len(claims)}\n"
         f"- 对齐证据数: {len(aligned)}\n"
-        f"- 报告风险: {report.get('risk_label')}（{report.get('risk_score')}）\n"
-        f"- 场景: {report.get('detected_scenario')}\n\n"
+        f"- 报告风险: {_zh_risk_label(report.get('risk_label'))}（{report.get('risk_score')}）\n"
+        f"- 场景: {_zh_scenario(report.get('detected_scenario'))}\n\n"
         "提示：下一步将对接对话工作台的‘加载该 record_id 到上下文’以实现真正追问与迭代。"
     )
 
@@ -594,11 +683,11 @@ def chat_session_stream(session_id: str, payload: ChatMessageCreateRequest) -> S
             }
 
             # 开始 token（让前端立即出现响应）
-            yield f"data: {ChatStreamEvent(type='token', data={'content': '已收到文本，开始分析…\\n', 'session_id': session_id}).model_dump_json()}\\n\\n"
+            yield f"data: {ChatStreamEvent(type='token', data={'content': '已收到文本，开始分析…\n', 'session_id': session_id}).model_dump_json()}\n\n"
 
             # 风险快照
-            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'risk', 'status': 'running'}).model_dump_json()}\\n\\n"
-            yield f"data: {ChatStreamEvent(type='token', data={'content': '- 风险快照：计算中…\\n', 'session_id': session_id}).model_dump_json()}\\n\\n"
+            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'risk', 'status': 'running'}).model_dump_json()}\n\n"
+            yield f"data: {ChatStreamEvent(type='token', data={'content': '- 风险快照：计算中…\n', 'session_id': session_id}).model_dump_json()}\n\n"
             phases_state["detect"] = "running"
             upsert_phase_snapshot(
                 task_id=session_id,
@@ -611,8 +700,23 @@ def chat_session_stream(session_id: str, payload: ChatMessageCreateRequest) -> S
             )
             with llm_slot():
                 risk = detect_risk_snapshot(analyze_text)
-            yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 风险快照：完成（{risk.label}，score={risk.score}）\\n', 'session_id': session_id}).model_dump_json()}\\n\\n"
-            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'risk', 'status': 'done'}).model_dump_json()}\\n\\n"
+            yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 风险快照：完成（{risk.label}，score={risk.score}）\n', 'session_id': session_id}).model_dump_json()}\n\n"
+            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'risk', 'status': 'done'}).model_dump_json()}\n\n"
+            risk_reasons = [str(item) for item in (risk.reasons or []) if str(item).strip()]
+            strategy = risk.strategy
+            risk_detail_lines = [
+                f"[风险详情] 标签: {_zh_risk_label(risk.label)} | 分数: {risk.score} | 置信度: {risk.confidence:.2f}",
+                (
+                    f"[风险详情] 策略: claims={strategy.max_claims} | evidence/claim={strategy.evidence_per_claim}"
+                    if strategy
+                    else "[风险详情] 策略: 使用默认策略"
+                ),
+            ]
+            if strategy and strategy.risk_reason:
+                risk_detail_lines.append(f"[风险详情] 风险策略: {_truncate_text(strategy.risk_reason, 72)}")
+            for reason in risk_reasons[:3]:
+                risk_detail_lines.append(f"[风险详情] - {_truncate_text(reason, 72)}")
+            yield f"data: {ChatStreamEvent(type='token', data={'content': '\n'.join(risk_detail_lines) + '\n', 'session_id': session_id}).model_dump_json()}\n\n"
             phases_state["detect"] = "done"
             upsert_phase_snapshot(
                 task_id=session_id,
@@ -625,8 +729,8 @@ def chat_session_stream(session_id: str, payload: ChatMessageCreateRequest) -> S
             )
 
             # 主张
-            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'claims', 'status': 'running'}).model_dump_json()}\\n\\n"
-            yield f"data: {ChatStreamEvent(type='token', data={'content': '- 主张抽取：进行中…\\n', 'session_id': session_id}).model_dump_json()}\\n\\n"
+            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'claims', 'status': 'running'}).model_dump_json()}\n\n"
+            yield f"data: {ChatStreamEvent(type='token', data={'content': '- 主张抽取：进行中…\n', 'session_id': session_id}).model_dump_json()}\n\n"
             phases_state["claims"] = "running"
             upsert_phase_snapshot(
                 task_id=session_id,
@@ -639,8 +743,14 @@ def chat_session_stream(session_id: str, payload: ChatMessageCreateRequest) -> S
             )
             with llm_slot():
                 claims = orchestrator.run_claims(analyze_text, strategy=risk.strategy)
-            yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 主张抽取：完成（{len(claims)} 条）\\n', 'session_id': session_id}).model_dump_json()}\\n\\n"
-            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'claims', 'status': 'done'}).model_dump_json()}\\n\\n"
+            yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 主张抽取：完成（{len(claims)} 条）\n', 'session_id': session_id}).model_dump_json()}\n\n"
+            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'claims', 'status': 'done'}).model_dump_json()}\n\n"
+            claim_lines: list[str] = []
+            for idx, claim in enumerate(claims, start=1):
+                claim_text = str(getattr(claim, "claim_text", "") or "").strip()
+                claim_id = str(getattr(claim, "claim_id", f"c{idx}") or f"c{idx}").upper()
+                claim_lines.append(f"[主张详情] {claim_id}：{claim_text}")
+            yield f"data: {ChatStreamEvent(type='token', data={'content': '\n'.join(claim_lines) + '\n', 'session_id': session_id}).model_dump_json()}\n\n"
             phases_state["claims"] = "done"
             upsert_phase_snapshot(
                 task_id=session_id,
@@ -653,8 +763,8 @@ def chat_session_stream(session_id: str, payload: ChatMessageCreateRequest) -> S
             )
 
             # 证据检索
-            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'evidence_search', 'status': 'running'}).model_dump_json()}\\n\\n"
-            yield f"data: {ChatStreamEvent(type='token', data={'content': '- 联网检索证据：进行中…\\n', 'session_id': session_id}).model_dump_json()}\\n\\n"
+            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'evidence_search', 'status': 'running'}).model_dump_json()}\n\n"
+            yield f"data: {ChatStreamEvent(type='token', data={'content': '- 联网检索证据：进行中…\n', 'session_id': session_id}).model_dump_json()}\n\n"
             phases_state["evidence"] = "running"
             upsert_phase_snapshot(
                 task_id=session_id,
@@ -666,16 +776,76 @@ def chat_session_stream(session_id: str, payload: ChatMessageCreateRequest) -> S
                 meta={"source": "chat"},
             )
             evidences = orchestrator.run_evidence(text=analyze_text, claims=claims, strategy=risk.strategy)
-            yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 联网检索证据：完成（候选 {len(evidences)} 条）\\n', 'session_id': session_id}).model_dump_json()}\\n\\n"
-            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'evidence_search', 'status': 'done'}).model_dump_json()}\\n\\n"
+            yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 联网检索证据：完成（候选 {len(evidences)} 条）\n', 'session_id': session_id}).model_dump_json()}\n\n"
+            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'evidence_search', 'status': 'done'}).model_dump_json()}\n\n"
+            evidence_lines = ["【原始检索证据】"]
+            for idx, claim in enumerate(claims, start=1):
+                if idx > 1:
+                    evidence_lines.append(_CLAIM_SEPARATOR)
+                claim_id = str(getattr(claim, "claim_id", f"c{idx}") or f"c{idx}").upper()
+                claim_text = str(getattr(claim, "claim_text", "") or "").strip()
+                evidence_lines.append(f"[主张 {claim_id}] {claim_text}")
+
+                related = [ev for ev in evidences if str(getattr(ev, "claim_id", "")) == str(getattr(claim, "claim_id", ""))]
+                if not related:
+                    evidence_lines.append("  [证据] 无")
+                    continue
+
+                for evidence_idx, ev in enumerate(related, start=1):
+                    title = str(getattr(ev, "title", "") or getattr(ev, "summary", "") or "无").strip()
+                    link = str(getattr(ev, "url", "") or "无")
+                    summary = _truncate_text(
+                        getattr(ev, "summary", "") or getattr(ev, "raw_snippet", "") or "无",
+                        120,
+                    )
+                    evidence_lines.append(f"  [证据 {evidence_idx}]")
+                    evidence_lines.append(f"    [标题] {title}")
+                    evidence_lines.append(f"    [来源链接] {link}")
+                    evidence_lines.append(f"    [摘要] {summary}")
+                    if evidence_idx < len(related):
+                        evidence_lines.append(f"    {_EVIDENCE_SEPARATOR}")
+            yield f"data: {ChatStreamEvent(type='token', data={'content': '\n'.join(evidence_lines) + '\n', 'session_id': session_id}).model_dump_json()}\n\n"
 
             # 证据聚合与对齐
-            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'evidence_align', 'status': 'running'}).model_dump_json()}\\n\\n"
-            yield f"data: {ChatStreamEvent(type='token', data={'content': '- 证据聚合与对齐：进行中…\\n', 'session_id': session_id}).model_dump_json()}\\n\\n"
+            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'evidence_align', 'status': 'running'}).model_dump_json()}\n\n"
+            yield f"data: {ChatStreamEvent(type='token', data={'content': '- 证据聚合与对齐：进行中…\n', 'session_id': session_id}).model_dump_json()}\n\n"
             with llm_slot():
                 aligned = align_evidences(claims=claims, evidences=evidences, strategy=risk.strategy)
-            yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 证据聚合与对齐：完成（对齐 {len(aligned)} 条）\\n', 'session_id': session_id}).model_dump_json()}\\n\\n"
-            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'evidence_align', 'status': 'done'}).model_dump_json()}\\n\\n"
+            yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 证据聚合与对齐：完成（对齐 {len(aligned)} 条）\n', 'session_id': session_id}).model_dump_json()}\n\n"
+            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'evidence_align', 'status': 'done'}).model_dump_json()}\n\n"
+            align_lines = ["【聚合后证据】"]
+            for idx, claim in enumerate(claims, start=1):
+                if idx > 1:
+                    align_lines.append(_CLAIM_SEPARATOR)
+                claim_id = str(getattr(claim, "claim_id", f"c{idx}") or f"c{idx}").upper()
+                claim_text = str(getattr(claim, "claim_text", "") or "").strip()
+                align_lines.append(f"[主张 {claim_id}] {claim_text}")
+
+                related = [ev for ev in aligned if str(getattr(ev, "claim_id", "")) == str(getattr(claim, "claim_id", ""))]
+                if not related:
+                    align_lines.append("  [聚合证据] 无")
+                    continue
+
+                for evidence_idx, ev in enumerate(related, start=1):
+                    merged_title = str(
+                        getattr(ev, "summary", "") if getattr(ev, "source_type", "") == "web_summary" else getattr(ev, "title", "")
+                    ).strip()
+                    stance_text = _zh_stance(getattr(ev, "stance", ""))
+                    conf = getattr(ev, "alignment_confidence", None)
+                    conf_text = f"{float(conf):.2f}" if isinstance(conf, (int, float)) else "无"
+                    weight = getattr(ev, "source_weight", None)
+                    weight_text = f"{float(weight):.2f}" if isinstance(weight, (int, float)) else "无"
+                    rationale = _truncate_text(getattr(ev, "alignment_rationale", "") or "无", 120)
+
+                    align_lines.append(f"  [聚合证据 {evidence_idx}]")
+                    align_lines.append(f"    [聚合后标题] {merged_title or '无'}")
+                    align_lines.append(f"    [立场] {stance_text}")
+                    align_lines.append(f"    [对齐置信度] {conf_text}")
+                    align_lines.append(f"    [对齐权重] {weight_text}")
+                    align_lines.append(f"    [对齐理由] {rationale}")
+                    if evidence_idx < len(related):
+                        align_lines.append(f"    {_EVIDENCE_SEPARATOR}")
+            yield f"data: {ChatStreamEvent(type='token', data={'content': '\n'.join(align_lines) + '\n', 'session_id': session_id}).model_dump_json()}\n\n"
             phases_state["evidence"] = "done"
             upsert_phase_snapshot(
                 task_id=session_id,
@@ -688,8 +858,8 @@ def chat_session_stream(session_id: str, payload: ChatMessageCreateRequest) -> S
             )
 
             # 报告
-            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'report', 'status': 'running'}).model_dump_json()}\\n\\n"
-            yield f"data: {ChatStreamEvent(type='token', data={'content': '- 综合报告：生成中…\\n', 'session_id': session_id}).model_dump_json()}\\n\\n"
+            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'report', 'status': 'running'}).model_dump_json()}\n\n"
+            yield f"data: {ChatStreamEvent(type='token', data={'content': '- 综合报告：生成中…\n', 'session_id': session_id}).model_dump_json()}\n\n"
             phases_state["report"] = "running"
             upsert_phase_snapshot(
                 task_id=session_id,
@@ -707,8 +877,22 @@ def chat_session_stream(session_id: str, payload: ChatMessageCreateRequest) -> S
                     evidences=aligned,
                     strategy=risk.strategy,
                 )
-            yield f"data: {ChatStreamEvent(type='token', data={'content': '- 综合报告：完成\\n', 'session_id': session_id}).model_dump_json()}\\n\\n"
-            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'report', 'status': 'done'}).model_dump_json()}\\n\\n"
+            yield f"data: {ChatStreamEvent(type='token', data={'content': '- 综合报告：完成\n', 'session_id': session_id}).model_dump_json()}\n\n"
+            yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'report', 'status': 'done'}).model_dump_json()}\n\n"
+            suspicious_points = [str(item) for item in (report.get("suspicious_points") or []) if str(item).strip()]
+            evidence_domains = [str(item) for item in (report.get("evidence_domains") or []) if str(item).strip()]
+            scenario_zh = _zh_scenario(report.get("detected_scenario"))
+            evidence_domains_zh = [d for d in (_zh_domain(item) for item in evidence_domains) if d]
+            report_lines = [
+                f"[报告详情] 风险: {_zh_risk_label(report.get('risk_label'))} | score={report.get('risk_score')} | level={_zh_risk_level(report.get('risk_level'))}",
+                f"[报告详情] 场景: {scenario_zh} | 证据域: {('、'.join(evidence_domains_zh) if evidence_domains_zh else '无')}",
+                f"[报告详情] 摘要: {str(report.get('summary', '') or '').strip()}",
+            ]
+            if suspicious_points:
+                report_lines.append("[报告详情] 可疑点:")
+                for point in suspicious_points:
+                    report_lines.append(f"- {point}")
+            yield f"data: {ChatStreamEvent(type='token', data={'content': '\n'.join(report_lines) + '\n', 'session_id': session_id}).model_dump_json()}\n\n"
 
             record_id = save_report(
                 input_text=analyze_text,
@@ -762,12 +946,12 @@ def chat_session_stream(session_id: str, payload: ChatMessageCreateRequest) -> S
             msg = ChatMessage(
                 role="assistant",
                 content=(
-                    "已完成一次全链路分析，并写入历史记录。\\n\\n"
-                    f"- 风险快照: {risk.label}（score={risk.score}）\\n"
-                    f"- 主张数: {len(claims)}\\n"
-                    f"- 对齐证据数: {len(aligned)}\\n"
-                    f"- 报告风险: {report.get('risk_label')}（{report.get('risk_score')}）\\n"
-                    f"- 场景: {report.get('detected_scenario')}\\n\\n"
+                    "已完成一次全链路分析，并写入历史记录。\n\n"
+                    f"- 风险快照: {_zh_risk_label(risk.label)}（score={risk.score}）\n"
+                    f"- 主张数: {len(claims)}\n"
+                    f"- 对齐证据数: {len(aligned)}\n"
+                    f"- 报告风险: {_zh_risk_label(report.get('risk_label'))}（{report.get('risk_score')}）\n"
+                    f"- 场景: {_zh_scenario(report.get('detected_scenario'))}\n\n"
                     "提示：可使用下方命令把本次 record_id 加载到前端上下文进行追问。"
                 ),
                 actions=[
@@ -794,8 +978,8 @@ def chat_session_stream(session_id: str, payload: ChatMessageCreateRequest) -> S
                 pass
 
             event = ChatStreamEvent(type="message", data={"session_id": session_id, "message": msg.model_dump()})
-            yield f"data: {event.model_dump_json()}\\n\\n"
-            yield f"data: {ChatStreamEvent(type='done', data={'session_id': session_id}).model_dump_json()}\\n\\n"
+            yield f"data: {event.model_dump_json()}\n\n"
+            yield f"data: {ChatStreamEvent(type='done', data={'session_id': session_id}).model_dump_json()}\n\n"
         except Exception as e:
             err = ChatStreamEvent(type="error", data={"session_id": session_id, "message": str(e)})
             yield f"data: {err.model_dump_json()}\n\n"
@@ -1045,11 +1229,11 @@ def chat_stream(payload: ChatRequest) -> StreamingResponse:
 
             content = (
                 "已完成一次全链路分析，并写入历史记录。\n\n"
-                f"- 风险快照: {risk.label}（score={risk.score}）\n"
+                f"- 风险快照: {_zh_risk_label(risk.label)}（score={risk.score}）\n"
                 f"- 主张数: {len(claims)}\n"
                 f"- 对齐证据数: {len(aligned)}\n"
-                f"- 报告风险: {report.get('risk_label')}（{report.get('risk_score')}）\n"
-                f"- 场景: {report.get('detected_scenario')}\n\n"
+                f"- 报告风险: {_zh_risk_label(report.get('risk_label'))}（{report.get('risk_score')}）\n"
+                f"- 场景: {_zh_scenario(report.get('detected_scenario'))}\n\n"
                 "提示：可使用下方命令把本次 record_id 加载到前端上下文进行追问。"
             )
 

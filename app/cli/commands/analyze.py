@@ -31,6 +31,43 @@ def _emoji(unicode_char: str, ascii_fallback: str) -> str:
     return unicode_char if _UNICODE_SUPPORT else ascii_fallback
 
 
+def _safe_print(text: str) -> None:
+    """Print text with terminal-encoding fallback."""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        encoding = sys.stdout.encoding or "utf-8"
+        sanitized = text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+        print(sanitized)
+
+
+def _safe_error(text: str) -> None:
+    """Print error text with terminal-encoding fallback."""
+    try:
+        typer.echo(text, err=True)
+    except UnicodeEncodeError:
+        encoding = sys.stderr.encoding or "utf-8"
+        sanitized = text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+        typer.echo(sanitized, err=True)
+
+
+def _decode_stdin_bytes(raw: bytes) -> str:
+    """Decode stdin bytes with best-effort fallback."""
+    candidates = [
+        "utf-8",
+        getattr(sys.stdin, "encoding", None),
+        "gb18030",
+    ]
+    for encoding in candidates:
+        if not encoding:
+            continue
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 def _read_input(file_path: Optional[str]) -> str:
     """
     Read input text from file or stdin.
@@ -60,7 +97,10 @@ def _read_input(file_path: Optional[str]) -> str:
             typer.echo(f"{_emoji('💡', '[INFO]')} 提示: 请输入待分析文本 (Ctrl+D 结束输入):", err=True)
         
         try:
-            text = sys.stdin.read()
+            if hasattr(sys.stdin, "buffer"):
+                text = _decode_stdin_bytes(sys.stdin.buffer.read())
+            else:
+                text = sys.stdin.read()
             return text.strip()
         except KeyboardInterrupt:
             typer.echo(f"\n{_emoji('❌', '[ERROR]')} 用户中断", err=True)
@@ -218,7 +258,7 @@ def analyze(
         raise
     
     if not text:
-        typer.echo(f"{_emoji('❌', '[ERROR]')} 输入为空", err=True)
+        _safe_error(f"{_emoji('❌', '[ERROR]')} 输入为空")
         raise typer.Exit(1)
     
     # Create API client
@@ -253,20 +293,20 @@ def analyze(
         # Output result
         if config.output_format == "json":
             # JSON output to stdout
-            print(json.dumps(report_result, ensure_ascii=True, indent=2))
+            _safe_print(json.dumps(report_result, ensure_ascii=True, indent=2))
         else:
             # Human-readable text output
             output = _format_text_output(report_result)
-            print(output)
+            _safe_print(output)
         
     except APIError as e:
-        typer.echo(e.user_friendly_message(), err=True)
+        _safe_error(e.user_friendly_message())
         raise typer.Exit(1)
     except KeyboardInterrupt:
-        typer.echo(f"\n{_emoji('❌', '[ERROR]')} 用户中断", err=True)
+        _safe_error(f"\n{_emoji('❌', '[ERROR]')} 用户中断")
         raise typer.Exit(0)
     except Exception as e:
-        typer.echo(f"{_emoji('❌', '[ERROR]')} 未知错误: {e}", err=True)
+        _safe_error(f"{_emoji('❌', '[ERROR]')} 未知错误: {e}")
         raise typer.Exit(1)
     finally:
         client.close()
