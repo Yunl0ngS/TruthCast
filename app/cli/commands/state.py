@@ -6,6 +6,7 @@ from typing import Optional
 import typer
 
 from app.cli.lib.state_manager import get_state_value, load_state, save_state, update_state
+from app.cli.lib.safe_output import safe_print, safe_print_err
 
 state_app = typer.Typer(help="Manage state and bound records")
 
@@ -24,15 +25,15 @@ def bind_record(
         truthcast show  # Uses bound rec_abc123
     """
     if not record_id or len(record_id) < 3:
-        typer.echo("❌ 错误: record_id 应该至少包含 3 个字符\n", err=True)
+        safe_print_err("emoji('❌', '[ERROR]') 错误: record_id 应该至少包含 3 个字符\n")
         sys.exit(1)
     
     try:
         update_state("bound_record_id", record_id)
-        typer.echo(f"\n✅ 已绑定 record_id: {record_id}\n")
-        typer.echo(f"💡 提示: 后续命令可使用绑定的记录，无需重复指定 record_id\n")
+        safe_print_err(f"\nemoji('✅', '[SUCCESS]') 已绑定 record_id: {record_id}\n")
+        safe_print(f"emoji('💡', '[INFO]') 提示: 后续命令可使用绑定的记录，无需重复指定 record_id\n")
     except Exception as e:
-        typer.echo(f"\n❌ 绑定失败: {e}\n", err=True)
+        safe_print(f"\nemoji('❌', '[ERROR]') 绑定失败: {e}\n")
         sys.exit(1)
 
 
@@ -42,13 +43,13 @@ def show_state() -> None:
     state = load_state()
     
     if not state:
-        typer.echo("\n📭 本地状态为空\n")
+        safe_print("\nemoji('📭', '[EMPTY]') 本地状态为空\n")
         return
     
-    typer.echo("\n📋 本地状态:\n")
+    safe_print("\nemoji('📋', '[INFO]') 本地状态:\n")
     for key, value in state.items():
-        typer.echo(f"  {key}: {value}")
-    typer.echo()
+        safe_print(f"  {key}: {value}")
+    safe_print("")
 
 
 @state_app.command("clear")
@@ -62,17 +63,17 @@ def clear_state(
 ) -> None:
     """Clear all local state."""
     if not confirm:
-        typer.echo("⚠️  这将清除所有本地状态（包括绑定的 record_id）")
+        safe_print_err("emoji('⚠️', '[WARN]')  这将清除所有本地状态（包括绑定的 record_id）")
         response = typer.confirm("确实要继续吗?")
         if not response:
-            typer.echo("✓ 已取消")
+            safe_print("emoji('✓', '[OK]') 已取消")
             return
     
     try:
         save_state({})
-        typer.echo("\n✅ 已清除所有本地状态\n")
+        safe_print("\nemoji('✅', '[SUCCESS]') 已清除所有本地状态\n")
     except Exception as e:
-        typer.echo(f"\n❌ 清除失败: {e}\n", err=True)
+        safe_print(f"\nemoji('❌', '[ERROR]') 清除失败: {e}\n")
         sys.exit(1)
 
 
@@ -101,8 +102,8 @@ def state(
     """
     if action == "bind":
         if not record_id:
-            typer.echo("❌ 错误: 'bind' 操作需要提供 record_id\n", err=True)
-            typer.echo("用法: truthcast state bind <record_id>", err=True)
+            safe_print_err("emoji('❌', '[ERROR]') 错误: 'bind' 操作需要提供 record_id\n")
+            safe_print_err("用法: truthcast state bind <record_id>")
             sys.exit(1)
         bind_record(record_id=record_id)
     elif action == "show":
@@ -110,8 +111,8 @@ def state(
     elif action in {"clear", "reset"}:
         clear_state()
     else:
-        typer.echo(
-            f"❌ 未知操作: {action}\n\n"
+        safe_print(
+            f"emoji('❌', '[ERROR]') 未知操作: {action}\n\n"
             f"支持的操作: bind, show, clear, reset\n",
             err=True,
         )

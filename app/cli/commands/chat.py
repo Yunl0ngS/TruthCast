@@ -16,25 +16,12 @@ import typer
 from app.cli.client import APIClient, APIError, TimeoutError as APITimeoutError
 from app.cli.lib.state_manager import get_state_value, update_state
 from app.cli._globals import get_global_config
+from app.cli.lib.safe_output import emoji, safe_print, safe_print_err, supports_unicode
 
 
 # Detect if console supports unicode/emoji
-def _supports_unicode() -> bool:
-    """Check if console supports unicode output."""
-    try:
-        # Try encoding a test emoji
-        "\u2705".encode(sys.stdout.encoding or 'utf-8')
-        return True
-    except (UnicodeEncodeError, LookupError):
-        return False
 
 
-_UNICODE_SUPPORT = _supports_unicode()
-
-
-def _emoji(unicode_char: str, ascii_fallback: str) -> str:
-    """Return emoji if supported, otherwise ASCII fallback."""
-    return unicode_char if _UNICODE_SUPPORT else ascii_fallback
 
 
 def _normalize_input_text(text: str) -> str:
@@ -224,25 +211,25 @@ def stream_chat_message(
 
 def render_token(content: str) -> None:
     """Render a token (incremental content) without newline."""
-    print(content, end="", flush=True)
+    safe_print(content, end="", flush=True)
 
 
 def render_stage(stage: str, status: str) -> None:
     """Render a stage update."""
     stage_emoji = {
-        "risk": _emoji("🔍", "[RISK]"),
-        "claims": _emoji("📋", "[CLAIMS]"),
-        "evidence_search": _emoji("🌐", "[SEARCH]"),
-        "evidence_align": _emoji("🔗", "[ALIGN]"),
-        "report": _emoji("📊", "[REPORT]"),
-        "simulation": _emoji("🎭", "[SIM]"),
-        "content": _emoji("✍️", "[WRITE]"),
+        "risk": emoji("🔍", "[RISK]"),
+        "claims": emoji("📋", "[CLAIMS]"),
+        "evidence_search": emoji("🌐", "[SEARCH]"),
+        "evidence_align": emoji("🔗", "[ALIGN]"),
+        "report": emoji("📊", "[REPORT]"),
+        "simulation": emoji("🎭", "[SIM]"),
+        "content": emoji("✍️", "[WRITE]"),
     }
     
     status_emoji = {
-        "running": _emoji("⏳", "[LOADING]"),
-        "done": _emoji("✅", "[DONE]"),
-        "failed": _emoji("❌", "[FAILED]"),
+        "running": emoji("⏳", "[LOADING]"),
+        "done": emoji("✅", "[DONE]"),
+        "failed": emoji("❌", "[FAILED]"),
     }
     
     stage_name = {
@@ -255,14 +242,14 @@ def render_stage(stage: str, status: str) -> None:
         "content": "应对内容",
     }
     
-    emoji = stage_emoji.get(stage, _emoji("📌", "[MARK]"))
+    emoji = stage_emoji.get(stage, emoji("📌", "[MARK]"))
     status_mark = status_emoji.get(status, "")
     name = stage_name.get(stage, stage)
     
     if status == "running":
-        print(f"\n{emoji} {name}中...")
+        safe_print(f"\n{emoji} {name}中...")
     elif status == "done":
-        print(f"{status_mark} {name}完成")
+        safe_print(f"{status_mark} {name}完成")
 
 
 def render_message(message: Dict[str, Any]) -> None:
@@ -273,39 +260,39 @@ def render_message(message: Dict[str, Any]) -> None:
     
     # Print main content
     if content:
-        print(f"\n{content}")
+        safe_print(f"\n{content}")
     
     # Print actions
     if actions:
-        print("\n[相关操作]")
+        safe_print("\n[相关操作]")
         for action in actions:
             label = action.get("label", "")
             command = action.get("command", "")
             href = action.get("href", "")
             
             if command:
-                print(f"  - {label}: {command}")
+                safe_print(f"  - {label}: {command}")
             elif href:
-                print(f"  - {label}: {href}")
+                safe_print(f"  - {label}: {href}")
     
     # Print references
     if references:
-        print("\n[参考链接]")
+        safe_print("\n[参考链接]")
         for ref in references[:5]:  # Limit to 5
             title = ref.get("title", "")
             href = ref.get("href", "")
             description = ref.get("description", "")
             
-            print(f"  - {title}")
+            safe_print(f"  - {title}")
             if href:
-                print(f"    {href}")
+                safe_print(f"    {href}")
             if description:
-                print(f"    {description}")
+                safe_print(f"    {description}")
 
 
 def render_error(error_msg: str) -> None:
     """Render an error message."""
-    print(f"\n{_emoji('❌', '[ERROR]')} 错误: {error_msg}")
+    safe_print(f"\n{emoji('❌', '[ERROR]')} 错误: {error_msg}")
 
 
 def handle_sse_stream(
@@ -335,7 +322,7 @@ def handle_sse_stream(
             token_buf = ""
             last_flush = time.monotonic()
         if force_newline:
-            print()
+            safe_print()
 
     try:
         _log_line(log_fp, f"[session] {session_id}")
@@ -390,11 +377,11 @@ def handle_sse_stream(
     except APIError as e:
         _flush_tokens(force_newline=True)
         _log_line(log_fp, f"[api_error] {e}")
-        print(f"\n{e.user_friendly_message()}", file=sys.stderr)
+        safe_print_err(f"\n{e.user_friendly_message()}")
     except Exception as e:
         _flush_tokens(force_newline=True)
         _log_line(log_fp, f"[unexpected_error] {e}")
-        print(f"\n{_emoji('❌', '[ERROR]')} 意外错误: {e}", file=sys.stderr)
+        safe_print_err(f"\n{emoji('❌', '[ERROR]')} 意外错误: {e}")
     finally:
         try:
             if log_fp is not None:
@@ -417,13 +404,13 @@ def create_session(client: APIClient) -> Optional[str]:
         response = client.post("/chat/sessions", json={})
         return response.get("session_id")
     except APIError as e:
-        print(f"\n{e.user_friendly_message()}", file=sys.stderr)
+        safe_print_err(f"\n{e.user_friendly_message()}")
         return None
 
 
 def signal_handler(sig, frame):
     """Handle Ctrl+C gracefully."""
-    print("\n\n[EXIT] 已退出对话模式", file=sys.stderr)
+    safe_print_err("\n\n[EXIT] 已退出对话模式")
     sys.exit(0)
 
 
@@ -522,16 +509,16 @@ def _try_enable_readline_history() -> None:
 
 
 def _print_repl_help() -> None:
-    print("\n[REPL 帮助]\n")
-    print("  - 单行长文本：直接输入并回车，自动按 /analyze 发起检测")
-    print("  - 粘贴多行文本：自动合并连续粘贴行后再检测")
-    print("  - 多行分析：输入 /paste 粘贴多行文本（默认作为 /analyze 发送）")
-    print("  - 多行消息：输入 /multiline 粘贴多行文本（作为普通消息发送）")
-    print("    - 结束并发送：输入单独一行 '.' 或 'EOF'，或输入 /send")
-    print("    - 取消：输入 /cancel")
-    print("  - 退出：/exit、quit、Ctrl+D")
-    print("  - 发送以 '/' 开头的普通文本：使用 '//' 开头（会自动去掉一个 '/'）")
-    print("  - 其他以 / 开头的命令会原样发送到后端执行（不在本地做参数校验）\n")
+    safe_print("\n[REPL 帮助]\n")
+    safe_print("  - 单行长文本：直接输入并回车，自动按 /analyze 发起检测")
+    safe_print("  - 粘贴多行文本：自动合并连续粘贴行后再检测")
+    safe_print("  - 多行分析：输入 /paste 粘贴多行文本（默认作为 /analyze 发送）")
+    safe_print("  - 多行消息：输入 /multiline 粘贴多行文本（作为普通消息发送）")
+    safe_print("    - 结束并发送：输入单独一行 '.' 或 'EOF'，或输入 /send")
+    safe_print("    - 取消：输入 /cancel")
+    safe_print("  - 退出：/exit、quit、Ctrl+D")
+    safe_print("  - 发送以 '/' 开头的普通文本：使用 '//' 开头（会自动去掉一个 '/'）")
+    safe_print("  - 其他以 / 开头的命令会原样发送到后端执行（不在本地做参数校验）\n")
 
 
 def _read_multiline_message() -> Optional[str]:
@@ -544,11 +531,11 @@ def _read_multiline_message() -> Optional[str]:
     Raises:
         EOFError: if stdin is closed (Ctrl+D / Ctrl+Z)
     """
-    print("\n[多行输入模式] 粘贴/输入多行内容，然后用 '.' / 'EOF' / /send 发送，/cancel 取消")
+    safe_print("\n[多行输入模式] 粘贴/输入多行内容，然后用 '.' / 'EOF' / /send 发送，/cancel 取消")
     lines = []
     while True:
         # Do not use input() here: avoid prompt spam when pasting many lines.
-        print("... ", end="", flush=True)
+        safe_print("... ", end="", flush=True)
         raw = sys.stdin.readline()
         if raw == "":
             raise EOFError
@@ -609,34 +596,34 @@ def chat(
     
     if not session_id:
         # Create new session
-        print(_emoji("🔄", "[LOADING]") + " 创建新会话...")
+        safe_print(emoji("🔄", "[LOADING]") + " 创建新会话...")
         session_id = create_session(client)
         if not session_id:
-            print(_emoji("❌", "[ERROR]") + " 无法创建会话", file=sys.stderr)
+            safe_print_err(emoji("❌", "[ERROR]") + " 无法创建会话")
             raise typer.Exit(1)
 
-        print(f"{_emoji('✅', '[SUCCESS]')} 会话已创建: {session_id}\n")
+        safe_print(f"{emoji('✅', '[SUCCESS]')} 会话已创建: {session_id}\n")
     else:
-        print(f"{_emoji('🔄', '[LOADING]')} 使用会话: {session_id}\n")
+        safe_print(f"{emoji('🔄', '[LOADING]')} 使用会话: {session_id}\n")
 
     # Persist the chosen session_id for next time
     assert session_id is not None
     update_state("last_session_id", session_id)
     
     # Welcome message
-    print("=" * 60)
-    print("TruthCast 对话工作台 - 交互式分析模式")
-    print("=" * 60)
-    print()
-    print(_emoji('💡', '[TIP]') + " 提示:")
-    print("  - 输入 /help 查看可用命令")
-    print("  - 直接输入文本即可自动检测（等价于 /analyze <文本>）")
-    print("  - 粘贴多行文本会自动合并后检测")
-    print("  - 仍可使用 /analyze <文本> 手动触发")
-    print("  - 输入 /exit 或 quit 退出")
-    print()
-    print("=" * 60)
-    print()
+    safe_print("=" * 60)
+    safe_print("TruthCast 对话工作台 - 交互式分析模式")
+    safe_print("=" * 60)
+    safe_print()
+    safe_print(emoji('💡', '[TIP]') + " 提示:")
+    safe_print("  - 输入 /help 查看可用命令")
+    safe_print("  - 直接输入文本即可自动检测（等价于 /analyze <文本>）")
+    safe_print("  - 粘贴多行文本会自动合并后检测")
+    safe_print("  - 仍可使用 /analyze <文本> 手动触发")
+    safe_print("  - 输入 /exit 或 quit 退出")
+    safe_print()
+    safe_print("=" * 60)
+    safe_print()
     
     # REPL loop
     pending_inputs: list[str] = []
@@ -645,7 +632,7 @@ def chat(
             # Get user input (single-line by default)
             if pending_inputs:
                 raw_input = _normalize_input_text(pending_inputs.pop(0)).strip()
-                print(f"You: {raw_input}")
+                safe_print(f"You: {raw_input}")
             else:
                 raw_input = _normalize_input_text(input("You: ")).strip()
 
@@ -654,15 +641,15 @@ def chat(
 
             # Exit commands (work even without leading '/')
             if raw_input.lower() in {"/exit", "quit", "exit"}:
-                print("\n[EXIT] 已退出对话模式")
+                safe_print("\n[EXIT] 已退出对话模式")
                 break
 
             # Allow sending a literal leading '/'
             if raw_input.startswith("//"):
                 user_input = _normalize_input_text(raw_input[1:])
-                print()  # Blank line before assistant response
+                safe_print()  # Blank line before assistant response
                 handle_sse_stream(client, session_id, user_input)
-                print()  # Blank line after response
+                safe_print()  # Blank line after response
                 continue
 
             # Local REPL commands (routing: leading '/' => command)
@@ -677,7 +664,7 @@ def chat(
                     try:
                         msg = _read_multiline_message()
                     except EOFError:
-                        print("\n\n[EXIT] 已退出对话模式")
+                        safe_print("\n\n[EXIT] 已退出对话模式")
                         break
 
                     if not msg:
@@ -689,7 +676,7 @@ def chat(
                         user_input = _normalize_input_text(msg)
                 elif cmd == "/send":
                     # /send only makes sense inside multiline mode
-                    print("\n提示: /send 用于多行输入模式的结束与发送；请先输入 /paste 或 /multiline\n")
+                    safe_print("\n提示: /send 用于多行输入模式的结束与发送；请先输入 /paste 或 /multiline\n")
                     continue
                 else:
                     # Forward other slash-commands to backend as-is.
@@ -703,13 +690,13 @@ def chat(
                 user_input = f"/analyze {merged_text}"
 
             # Send to backend and stream response
-            print()  # Blank line before assistant response
+            safe_print()  # Blank line before assistant response
             handle_sse_stream(client, session_id, user_input)
-            print()  # Blank line after response
+            safe_print()  # Blank line after response
         
         except EOFError:
             # Handle Ctrl+D (Unix) or Ctrl+Z (Windows)
-            print("\n\n[EXIT] 已退出对话模式")
+            safe_print("\n\n[EXIT] 已退出对话模式")
             break
     
     # Clean exit

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from app.cli.client import APIClient, APIError
 from app.cli._globals import get_global_config
+from app.cli.lib.safe_output import emoji, safe_print, safe_print_err
 
 logger = logging.getLogger(__name__)
 
@@ -74,32 +75,32 @@ def _save_content_to_file(record_id: str, content_data: dict) -> Path:
     return file_path
 
 def _format_readable_output(response_data: dict, style: str, record_id: str) -> None:
-    typer.echo()
+    safe_print("")
     typer.secho("[CONTENT GENERATION COMPLETE]", fg=typer.colors.GREEN)
-    typer.echo()
+    safe_print("")
     
     if "clarification" in response_data and response_data["clarification"]:
         clarif = response_data["clarification"]
         typer.secho("[CLARIFICATION]", fg=typer.colors.BLUE)
-        typer.echo(f"Style: {STYLE_ZH.get(style, style)}")
-        typer.echo()
-        typer.echo("Short version (100 words):")
-        typer.echo(clarif.get("short", ""))
-        typer.echo()
-        typer.echo("Medium version (300 words):")
-        typer.echo(clarif.get("medium", ""))
-        typer.echo()
-        typer.echo("Long version (600 words):")
-        typer.echo(clarif.get("long", ""))
-        typer.echo()
+        safe_print(f"Style: {STYLE_ZH.get(style, style)}")
+        safe_print("")
+        safe_print("Short version (100 words):")
+        safe_print(clarif.get("short", ""))
+        safe_print("")
+        safe_print("Medium version (300 words):")
+        safe_print(clarif.get("medium", ""))
+        safe_print("")
+        safe_print("Long version (600 words):")
+        safe_print(clarif.get("long", ""))
+        safe_print("")
     
     if "faq" in response_data and response_data["faq"]:
         faq_list = response_data["faq"]
         typer.secho(f"[FAQ] ({len(faq_list)} items)", fg=typer.colors.BLUE)
         for idx, faq_item in enumerate(faq_list, 1):
-            typer.echo(f"Q{idx}: {faq_item.get('question', '')}")
-            typer.echo(f"A{idx}: {faq_item.get('answer', '')}")
-            typer.echo()
+            safe_print(f"Q{idx}: {faq_item.get('question', '')}")
+            safe_print(f"A{idx}: {faq_item.get('answer', '')}")
+            safe_print("")
     
     if "platform_scripts" in response_data and response_data["platform_scripts"]:
         typer.secho("[PLATFORM SCRIPTS]", fg=typer.colors.BLUE)
@@ -107,13 +108,13 @@ def _format_readable_output(response_data: dict, style: str, record_id: str) -> 
             platform = script.get("platform", "unknown")
             label = PLATFORM_LABELS.get(platform, f"[{platform.upper()}]")
             content_len = len(script.get("content", ""))
-            typer.echo(f"{label} ({content_len} chars):")
-            typer.echo(script.get("content", ""))
+            safe_print(f"{label} ({content_len} chars):")
+            safe_print(script.get("content", ""))
             if script.get("tips"):
-                typer.echo("  Tips:")
+                safe_print("  Tips:")
                 for tip in script["tips"]:
-                    typer.echo(f"    - {tip}")
-            typer.echo()
+                    safe_print(f"    - {tip}")
+            safe_print("")
     
     try:
         file_path = _save_content_to_file(record_id, response_data)
@@ -134,7 +135,7 @@ def content(
         config = get_global_config()
         client = APIClient(base_url=config.api_base, timeout=config.timeout, retry_times=config.retry_times)
         
-        typer.echo(f"[Fetching analysis data...] (record_id: {record_id})")
+        safe_print(f"[Fetching analysis data...] (record_id: {record_id})")
         
         history_resp = client.get(f"/history/{record_id}")
         if not history_resp:
@@ -149,7 +150,7 @@ def content(
             typer.secho("[Error]: No report data found for this record", fg=typer.colors.RED)
             raise typer.Exit(1)
         
-        typer.echo(f"[Generating response content...]")
+        safe_print(f"[Generating response content...]")
         
         platforms_list = None
         if platforms:
@@ -165,7 +166,7 @@ def content(
         response = client.post("/content/generate", json=payload)
         
         if json_output:
-            typer.echo(json.dumps(response, ensure_ascii=False, indent=2))
+            safe_print(json.dumps(response, ensure_ascii=False, indent=2))
         else:
             _format_readable_output(response, style, record_id)
     

@@ -8,6 +8,7 @@ from typing import Any, Optional
 import typer
 
 from app.cli._globals import get_global_config
+from app.cli.lib.safe_output import emoji, safe_print, safe_print_err
 from app.cli.client import APIClient, APIError
 from app.cli.lib.state_manager import get_state_value, update_state
 
@@ -18,23 +19,6 @@ def _default_export_dir() -> Path:
     return base
 
 
-# Detect if console supports unicode/emoji
-def _supports_unicode() -> bool:
-    """Check if console supports unicode output."""
-    try:
-        # Try encoding a test emoji
-        "\u2705".encode(sys.stdout.encoding or 'utf-8')
-        return True
-    except (UnicodeEncodeError, LookupError):
-        return False
-
-
-_UNICODE_SUPPORT = _supports_unicode()
-
-
-def _emoji(unicode_char: str, ascii_fallback: str) -> str:
-    """Return emoji if supported, otherwise ASCII fallback."""
-    return unicode_char if _UNICODE_SUPPORT else ascii_fallback
 
 
 def _to_markdown(history_detail: dict[str, Any]) -> str:
@@ -163,20 +147,20 @@ def export_cmd(
     if not record_id:
         record_id = get_state_value("bound_record_id") or None
     if not record_id:
-        typer.echo(_emoji('❌', '[ERROR]') + " 缺少 record_id. 用法: truthcast export --record-id <record_id>", err=True)
-        typer.echo("   或先用 'truthcast state bind <record_id>' 绑定默认记录", err=True)
+        safe_print(emoji('❌', '[ERROR]') + " 缺少 record_id. 用法: truthcast export --record-id <record_id>", err=True)
+        safe_print_err("   或先用 'truthcast state bind <record_id>' 绑定默认记录")
         raise typer.Exit(1)
 
     fmt = (format_type or "").strip().lower()
     if fmt not in {"json", "markdown", "md"}:
-        typer.echo(f"{_emoji('❌', '[ERROR]')} 不支持的导出格式: {format_type} (支持: json, markdown)", err=True)
+        safe_print(f"{emoji('❌', '[ERROR]')} 不支持的导出格式: {format_type} (支持: json, markdown)", err=True)
         raise typer.Exit(1)
 
     client = APIClient(base_url=config.api_base, timeout=config.timeout, retry_times=config.retry_times)
     try:
         history_detail = client.get(f"/history/{record_id}")
     except APIError as e:
-        typer.echo(e.user_friendly_message(), err=True)
+        safe_print_err(e.user_friendly_message())
         raise typer.Exit(1)
     finally:
         client.close()
@@ -189,7 +173,7 @@ def export_cmd(
         ext = "md"
 
     if stdout:
-        typer.echo(content)
+        safe_print(content)
         return
 
     out_path = Path(output) if output else (_default_export_dir() / f"truthcast_{record_id}.{ext}")
@@ -201,4 +185,4 @@ def export_cmd(
     except Exception:
         pass
 
-    typer.echo(f"{_emoji('✅', '[SUCCESS]')} 已导出: {out_path}")
+    safe_print(f"{emoji('✅', '[SUCCESS]')} 已导出: {out_path}")

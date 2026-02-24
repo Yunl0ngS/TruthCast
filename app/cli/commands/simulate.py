@@ -5,6 +5,7 @@ import sys
 from typing import Any
 
 import typer
+from app.cli.lib.safe_output import emoji, safe_print, safe_print_err
 
 from app.cli.client import APIClient, APIError
 from app.cli.config import get_config
@@ -15,98 +16,98 @@ def _format_emotion_stage(data: dict[str, Any]) -> None:
     emotion_dist = data.get("emotion_distribution", {})
     stance_dist = data.get("stance_distribution", {})
     
-    typer.echo("\n" + "="*60)
-    typer.echo("[STAGE 1] 第一阶段：情绪与立场分析 (Emotion & Stance Analysis)")
-    typer.echo("="*60)
+    safe_print("\n" + "="*60)
+    safe_print("[STAGE 1] 第一阶段：情绪与立场分析 (Emotion & Stance Analysis)")
+    safe_print("="*60)
     
     if emotion_dist:
-        typer.echo("\n情绪分布 (Emotion Distribution):")
+        safe_print("\n情绪分布 (Emotion Distribution):")
         for emotion, percentage in emotion_dist.items():
             bar_length = int(percentage / 5)
             bar = "█" * bar_length + "░" * (20 - bar_length)
-            typer.echo(f"  {emotion:12s} {bar} {percentage:5.1f}%")
+            safe_print(f"  {emotion:12s} {bar} {percentage:5.1f}%")
     
     if stance_dist:
-        typer.echo("\n立场分布 (Stance Distribution):")
+        safe_print("\n立场分布 (Stance Distribution):")
         for stance, count in stance_dist.items():
-            typer.echo(f"  {stance}: {count}")
+            safe_print(f"  {stance}: {count}")
     
     drivers = data.get("emotion_drivers", [])
     if drivers:
-        typer.echo("\n情绪驱动因素 (Emotion Drivers):")
+        safe_print("\n情绪驱动因素 (Emotion Drivers):")
         for i, driver in enumerate(drivers, 1):
-            typer.echo(f"  {i}. {driver}")
+            safe_print(f"  {i}. {driver}")
 
 
 def _format_narratives_stage(data: dict[str, Any]) -> None:
     """Format and display narrative branches stage."""
     narratives = data.get("narratives", [])
     
-    typer.echo("\n" + "="*60)
-    typer.echo("[STAGE 2] 第二阶段：叙事分支生成 (Narrative Branch Generation)")
-    typer.echo("="*60)
+    safe_print("\n" + "="*60)
+    safe_print("[STAGE 2] 第二阶段：叙事分支生成 (Narrative Branch Generation)")
+    safe_print("="*60)
     
     if narratives:
         for i, narrative in enumerate(narratives, 1):
-            typer.echo(f"\n  分支 {i}: {narrative.get('title', 'N/A')}")
+            safe_print(f"\n  分支 {i}: {narrative.get('title', 'N/A')}")
             if narrative.get("description"):
-                typer.echo(f"    描述: {narrative['description']}")
+                safe_print(f"    描述: {narrative['description']}")
             if narrative.get("spread_potential"):
-                typer.echo(f"    传播潜力: {narrative['spread_potential']}")
+                safe_print(f"    传播潜力: {narrative['spread_potential']}")
             if narrative.get("trigger_keywords"):
                 keywords = narrative["trigger_keywords"]
                 if isinstance(keywords, str):
                     keywords = [keywords]
-                typer.echo(f"    触发词: {', '.join(keywords)}")
+                safe_print(f"    触发词: {', '.join(keywords)}")
     else:
-        typer.echo("  (无叙事分支)")
+        safe_print("  (无叙事分支)")
 
 
 def _format_flashpoints_stage(data: dict[str, Any]) -> None:
     """Format and display flashpoint identification stage."""
     flashpoints = data.get("flashpoints", [])
     
-    typer.echo("\n" + "="*60)
-    typer.echo("[STAGE 3] 第三阶段：引爆点识别 (Flashpoint Identification)")
-    typer.echo("="*60)
+    safe_print("\n" + "="*60)
+    safe_print("[STAGE 3] 第三阶段：引爆点识别 (Flashpoint Identification)")
+    safe_print("="*60)
     
     if flashpoints:
         for i, flashpoint in enumerate(flashpoints, 1):
-            typer.echo(f"\n  引爆点 {i}: {flashpoint.get('trigger', 'N/A')}")
+            safe_print(f"\n  引爆点 {i}: {flashpoint.get('trigger', 'N/A')}")
             if flashpoint.get("risk_level"):
-                typer.echo(f"    风险等级: {flashpoint['risk_level']}")
+                safe_print(f"    风险等级: {flashpoint['risk_level']}")
             if flashpoint.get("estimated_reach"):
-                typer.echo(f"    预估传播范围: {flashpoint['estimated_reach']}")
+                safe_print(f"    预估传播范围: {flashpoint['estimated_reach']}")
             if flashpoint.get("impact"):
-                typer.echo(f"    影响: {flashpoint['impact']}")
+                safe_print(f"    影响: {flashpoint['impact']}")
     else:
-        typer.echo("  (无明显引爆点)")
+        safe_print("  (无明显引爆点)")
 
 
 def _format_suggestion_stage(data: dict[str, Any]) -> None:
     """Format and display mitigation suggestions stage."""
     suggestion = data.get("suggestion", {})
     
-    typer.echo("\n" + "="*60)
-    typer.echo("[STAGE 4] 第四阶段：应对建议 (Mitigation Suggestions)")
-    typer.echo("="*60)
+    safe_print("\n" + "="*60)
+    safe_print("[STAGE 4] 第四阶段：应对建议 (Mitigation Suggestions)")
+    safe_print("="*60)
     
     if suggestion.get("summary"):
-        typer.echo(f"\n摘要: {suggestion['summary']}")
+        safe_print(f"\n摘要: {suggestion['summary']}")
     
     actions = suggestion.get("actions", [])
     if actions:
-        typer.echo("\n建议行动:")
+        safe_print("\n建议行动:")
         for i, action in enumerate(actions, 1):
-            typer.echo(f"\n  {i}. {action.get('action', 'N/A')}")
+            safe_print(f"\n  {i}. {action.get('action', 'N/A')}")
             if action.get("priority"):
-                typer.echo(f"     优先级: {action['priority']}")
+                safe_print(f"     优先级: {action['priority']}")
             if action.get("timeline"):
-                typer.echo(f"     时间线: {action['timeline']}")
+                safe_print(f"     时间线: {action['timeline']}")
             if action.get("category"):
-                typer.echo(f"     类别: {action['category']}")
+                safe_print(f"     类别: {action['category']}")
     else:
-        typer.echo("\n  (无具体建议)")
+        safe_print("\n  (无具体建议)")
 
 
 def _parse_sse_event(line: str) -> dict[str, Any] | None:
@@ -156,8 +157,8 @@ def simulate(
         state = load_state()
         record = state.get("bound_record_id")
         if not record:
-            typer.echo("[ERROR] 缺少 record_id. 用法: truthcast simulate --record <record_id>", err=True)
-            typer.echo("   或先用 'truthcast bind <record_id>' 绑定默认记录", err=True)
+            safe_print("[ERROR] 缺少 record_id. 用法: truthcast simulate --record <record_id>", err=True)
+            safe_print("   或先用 'truthcast bind <record_id>' 绑定默认记录", err=True)
             raise typer.Exit(code=1)
     
     client = APIClient(
@@ -171,9 +172,9 @@ def simulate(
         history_detail = client.get(f"/history/{record}")
     except APIError as e:
         if e.status_code == 404:
-            typer.echo(f"[ERROR] 记录不存在: {record}", err=True)
+            safe_print(f"[ERROR] 记录不存在: {record}", err=True)
         else:
-            typer.echo(e.user_friendly_message(), err=True)
+            safe_print(e.user_friendly_message(), err=True)
         raise typer.Exit(code=1)
     
     # Prepare simulate request payload
@@ -190,8 +191,8 @@ def simulate(
     if stream:
         # SSE streaming mode
         if not json_output:
-            typer.echo(f"[STREAM] 正在流式输出舆情预演结果... (record_id: {record})")
-            typer.echo("Press Ctrl+C to cancel\n")
+            safe_print(f"[STREAM] 正在流式输出舆情预演结果... (record_id: {record})")
+            safe_print("Press Ctrl+C to cancel\n")
         
         try:
             # Call /simulate/stream with raw response using stream method
@@ -202,7 +203,7 @@ def simulate(
             ) as response:
                 
                 if response.status_code != 200:
-                    typer.echo(f"[ERROR] 舆情预演失败: HTTP {response.status_code}", err=True)
+                    safe_print(f"[ERROR] 舆情预演失败: HTTP {response.status_code}", err=True)
                     raise typer.Exit(code=1)
                 
                 # Parse SSE stream
@@ -228,7 +229,7 @@ def simulate(
                         if event:
                             stage = event.get("stage")
                             if json_output:
-                                typer.echo(json.dumps(event, ensure_ascii=False))
+                                safe_print(json.dumps(event, ensure_ascii=False))
                             else:
                                 # Accumulate data and format by stage
                                 if stage == "emotion":
@@ -245,35 +246,35 @@ def simulate(
                                     _format_suggestion_stage(event)
                                     # Final stage: add separator
                                     if not json_output:
-                                        typer.echo("\n" + "="*60)
-                                        typer.echo("[SUCCESS] 舆情预演完成 (Complete)")
-                                        typer.echo("="*60 + "\n")
+                                        safe_print("\n" + "="*60)
+                                        safe_print("[SUCCESS] 舆情预演完成 (Complete)")
+                                        safe_print("="*60 + "\n")
         
         except KeyboardInterrupt:
             if not json_output:
-                typer.echo("\n\n[CANCELLED] 预演已取消 (Cancelled by user)", err=True)
+                safe_print("\n\n[CANCELLED] 预演已取消 (Cancelled by user)", err=True)
             raise typer.Exit(code=130)
         except Exception as e:
             if not json_output:
-                typer.echo(f"[ERROR] 流式传输错误: {str(e)}", err=True)
+                safe_print(f"[ERROR] 流式传输错误: {str(e)}", err=True)
             raise typer.Exit(code=1)
     
     else:
         # Non-streaming mode (fetch complete result)
         if not json_output:
-            typer.echo(f"[LOADING] 正在生成舆情预演结果... (record_id: {record})")
+            safe_print(f"[LOADING] 正在生成舆情预演结果... (record_id: {record})")
         try:
             result = client.post("/simulate", json=payload)
             
             if json_output:
-                typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+                safe_print(json.dumps(result, ensure_ascii=False, indent=2))
             else:
-                typer.echo("\n[SUCCESS] 舆情预演完成")
-                typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+                safe_print("\n[SUCCESS] 舆情预演完成")
+                safe_print(json.dumps(result, ensure_ascii=False, indent=2))
         
         except APIError as e:
-            typer.echo(e.user_friendly_message(), err=True)
+            safe_print(e.user_friendly_message(), err=True)
             raise typer.Exit(code=1)
         except Exception as e:
-            typer.echo(f"[ERROR] 舆情预演失败: {str(e)}", err=True)
+            safe_print(f"[ERROR] 舆情预演失败: {str(e)}", err=True)
             raise typer.Exit(code=1)
