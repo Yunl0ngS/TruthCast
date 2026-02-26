@@ -15,9 +15,34 @@ import typer
 
 from app.cli._globals import get_global_config
 from app.cli.client import APIClient, APIError
-from app.cli.commands.analyze import run_analysis_pipeline
 from app.cli.lib.state_manager import update_state
 from app.services.json_utils import safe_json_loads
+
+
+def _run_analysis_pipeline(client: APIClient, text: str) -> dict[str, Any]:
+    input_text = (text or "").strip()
+    if not input_text:
+        raise ValueError("缺少输入文本")
+    report_result = client.post("/detect/report", json={"text": input_text})
+    return {"report": report_result}
+
+
+def run_pipeline_locally(text: str) -> dict[str, Any]:
+    """Compatibility helper for `truthcast analyze --local-agent`.
+
+    This keeps the public callable expected by analyze command while reusing
+    the same backend pipeline request path.
+    """
+    config = get_global_config()
+    client = APIClient(
+        base_url=config.api_base,
+        timeout=float(config.timeout),
+        retry_times=config.retry_times,
+    )
+    try:
+        return _run_analysis_pipeline(client, text)
+    finally:
+        client.close()
 
 
 def _llm_endpoint() -> str:
@@ -130,11 +155,23 @@ def _print_help() -> None:
     typer.echo("  • 注意：需要配置 TRUTHCAST_LLM_API_KEY/TRUTHCAST_LLM_BASE_URL/TRUTHCAST_LLM_MODEL\n")
 
 
-def run_local_agent_repl() -> None:
+def run_local_agent_repl() -> bool:
     """Run a local-agent REPL.
 
     This mode calls a local LLM to decide whether to execute tools.
+
+    Returns:
+        True if local-agent mode is started/handled by this function.
+        False if local-agent prerequisites are missing and caller should fallback.
     """
+    if not _llm_api_key():
+        typer.echo(
+            "[WARN] 本地 Agent 未配置 TRUTHCAST_LLM_API_KEY，"
+            "将回退到后端编排模式（可去掉 --local-agent 或配置密钥）。",
+            err=True,
+        )
+        return False
+
     config = get_global_config()
     typer.echo("=" * 60)
     typer.echo("TruthCast REPL (Local Agent Mode)")
@@ -156,7 +193,7 @@ def run_local_agent_repl() -> None:
 
                 if raw.lower() in {"/exit", "quit", "exit"}:
                     typer.echo("\n[✓] 已退出")
-                    return
+                    return True
                 if raw.startswith("/"):
                     cmd = raw.split()[0].lower()
                     if cmd == "/help":
@@ -180,7 +217,7 @@ def run_local_agent_repl() -> None:
                         text = raw
 
                     typer.echo("\n[agent] calling tool: analyze\n")
-                    outputs = run_analysis_pipeline(client, text)
+                    outputs = _run_analysis_pipeline(client, text)
                     report_result = outputs.get("report") or {}
 
                     record_id = report_result.get("record_id")
@@ -206,10 +243,10 @@ def run_local_agent_repl() -> None:
 
             except EOFError:
                 typer.echo("\n\n[✓] 已退出")
-                return
+                return True
             except KeyboardInterrupt:
                 typer.echo("\n\n[✓] 已退出")
-                return
+                return True
             except APIError as e:
                 typer.echo(e.user_friendly_message(), err=True)
             except Exception as e:
@@ -217,3 +254,5 @@ def run_local_agent_repl() -> None:
                 time.sleep(0.2)
     finally:
         client.close()
+
+    return True

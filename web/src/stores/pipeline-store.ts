@@ -28,6 +28,7 @@ import {
   loadLatestPipelineState,
   savePipelinePhaseSnapshot,
   updateHistorySimulation,
+  detectUrl,
 } from '@/services/api';
 import type { SimulationStage, SimulationStreamEvent } from '@/services/api';
 
@@ -71,6 +72,7 @@ interface PipelineState {
   retryPhase: (phase: Phase) => Promise<void>;
   retryFailed: () => Promise<void>;
   loadFromHistory: (detail: HistoryDetail, simulation?: SimulateResponse | null) => void;
+  crawlUrl: (url: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -180,6 +182,70 @@ async function _persistPhaseSnapshot(
 
 export const usePipelineStore = create<PipelineState>((set, get) => ({
   ...initialState,
+
+  crawlUrl: async (url: string) => {
+    const { setPhase, setError } = get();
+
+    // 生成新的 AbortController 并重置状态 (类似 runPipeline)
+    const controller = new AbortController();
+    const signal = controller.signal;
+    const taskId = _makeTaskId();
+
+    set({
+      taskId,
+      text: '',
+      error: null,
+      detectData: null,
+      strategy: null,
+      claims: [],
+      rawEvidences: [],
+      evidences: [],
+      report: null,
+      simulation: null,
+      content: null,
+      phases: INIT_PHASE_STATE,
+      recordId: null,
+      abortController: controller,
+      isFromHistory: false,
+    });
+
+    toast.info('正在抓取链接内容...');
+    setPhase('detect', 'running');
+    void _persistPhaseSnapshot(get, 'detect', 'running', { payload: { url } });
+
+    try {
+      const result = await detectUrl(url, signal);
+      if (!result.success) {
+        throw new Error(result.error_msg || '抓取失败');
+      }
+
+      // 抓取成功，填充数据
+      set({
+        text: result.content,
+        detectData: result.risk,
+        strategy: result.risk?.strategy ?? null,
+      });
+
+      setPhase('detect', 'done');
+      void _persistPhaseSnapshot(get, 'detect', 'done');
+      toast.success('链接抓取与初步评估完成');
+
+      // 抓取成功后，自动接续后续流水线
+      // 调用 runPipeline({ taskId }) 确保全链路快照完整
+      await get().runPipeline({ taskId });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setPhase('detect', 'canceled');
+        return;
+      }
+      const errorMsg = err instanceof Error ? err.message : '未知错误';
+      setError(`链接抓取失败：${errorMsg}`);
+      setPhase('detect', 'failed');
+      void _persistPhaseSnapshot(get, 'detect', 'failed', { error_message: errorMsg });
+      toast.error(`链接抓取失败：${errorMsg}`);
+      throw err;
+    }
+  },
 
   setTaskId: (taskId) => set({ taskId }),
 

@@ -77,8 +77,22 @@ const {
 
   const stageMsgDedupRef = useRef<string | null>(null);
   const prevStageAtRef = useRef<number | null>(null);
+  const simulationStageBootstrappedRef = useRef(false);
   useEffect(() => {
     if (!simulationStage) return;
+
+    // 首次挂载时，若当前既未流式对话也未运行流水线，跳过历史残留 stage 的回灌，避免误报“已完成”。
+    if (!simulationStageBootstrappedRef.current) {
+      simulationStageBootstrappedRef.current = true;
+      const pipelineRunningNow = Object.values(phases).some((s) => s === 'running');
+      if (!is_streaming && !pipelineRunningNow) {
+        const atIsoInit = simulationStageAt ?? new Date().toISOString();
+        const atMsInit = Number.isFinite(Date.parse(atIsoInit)) ? Date.parse(atIsoInit) : Date.now();
+        prevStageAtRef.current = atMsInit;
+        return;
+      }
+    }
+
     const atIso = simulationStageAt ?? new Date().toISOString();
     const dedupKey = `${taskId ?? ''}_${simulationStage}_${atIso}`;
     if (stageMsgDedupRef.current === dedupKey) return;
@@ -131,7 +145,7 @@ const {
       },
       actions: [{ type: 'link', label: '打开舆情预演', href: '/simulation' }],
     });
-  }, [addMessage, simulation, simulationStage, simulationStageAt, taskId, updateMessage]);
+  }, [addMessage, simulation, simulationStage, simulationStageAt, taskId, updateMessage, is_streaming, phases]);
 
   const isPipelineRunning = useMemo(
     () => Object.values(phases).some((s) => s === 'running'),
@@ -667,16 +681,7 @@ const {
       return;
     }
 
-    // 4) 默认：如果是长文本且不是命令，直接当做待分析输入
-    // 注意：像 `/why <record_id>`、`/list 20` 这类命令本身可能也很长，不能误触发自动分析。
-    if (!input.trim().startsWith('/') && input.length >= 20) {
-      setText(input);
-      addMessage('assistant', '检测到你输入的是待分析文本，已自动启动分析。');
-      runPipeline({ taskId: session_id ?? null });
-      return;
-    }
-
-    // 5) 其它短输入：走后端 /chat（V0 占位编排），返回 actions 与 references
+    // 4) 默认：统一走后端会话流，由后端智能体决定是澄清、单技能还是全链路执行
     try {
       setStreaming(true);
       const assistantMsgId = addMessage('assistant', '');

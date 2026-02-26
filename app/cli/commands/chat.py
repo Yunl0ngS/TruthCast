@@ -14,9 +14,13 @@ import httpx
 import typer
 
 from app.cli.client import APIClient, APIError, TimeoutError as APITimeoutError
+from app.cli.lib.chat_renderer import ChatRenderer
 from app.cli.lib.state_manager import get_state_value, update_state
 from app.cli._globals import get_global_config
 from app.cli.lib.safe_output import emoji, safe_print, safe_print_err, supports_unicode
+
+
+_renderer = ChatRenderer()
 
 
 # Detect if console supports unicode/emoji
@@ -211,88 +215,22 @@ def stream_chat_message(
 
 def render_token(content: str) -> None:
     """Render a token (incremental content) without newline."""
-    safe_print(content, end="", flush=True)
+    _renderer.render_token(content)
 
 
 def render_stage(stage: str, status: str) -> None:
     """Render a stage update."""
-    stage_emoji = {
-        "risk": emoji("🔍", "[RISK]"),
-        "claims": emoji("📋", "[CLAIMS]"),
-        "evidence_search": emoji("🌐", "[SEARCH]"),
-        "evidence_align": emoji("🔗", "[ALIGN]"),
-        "report": emoji("📊", "[REPORT]"),
-        "simulation": emoji("🎭", "[SIM]"),
-        "content": emoji("✍️", "[WRITE]"),
-    }
-    
-    status_emoji = {
-        "running": emoji("⏳", "[LOADING]"),
-        "done": emoji("✅", "[DONE]"),
-        "failed": emoji("❌", "[FAILED]"),
-    }
-    
-    stage_name = {
-        "risk": "风险快照",
-        "claims": "主张抽取",
-        "evidence_search": "证据检索",
-        "evidence_align": "证据对齐",
-        "report": "综合报告",
-        "simulation": "舆情预演",
-        "content": "应对内容",
-    }
-    
-    emoji = stage_emoji.get(stage, emoji("📌", "[MARK]"))
-    status_mark = status_emoji.get(status, "")
-    name = stage_name.get(stage, stage)
-    
-    if status == "running":
-        safe_print(f"\n{emoji} {name}中...")
-    elif status == "done":
-        safe_print(f"{status_mark} {name}完成")
+    _renderer.render_stage(stage, status)
 
 
 def render_message(message: Dict[str, Any]) -> None:
     """Render a complete message with actions and references."""
-    content = message.get("content", "")
-    actions = message.get("actions", [])
-    references = message.get("references", [])
-    
-    # Print main content
-    if content:
-        safe_print(f"\n{content}")
-    
-    # Print actions
-    if actions:
-        safe_print("\n[相关操作]")
-        for action in actions:
-            label = action.get("label", "")
-            command = action.get("command", "")
-            href = action.get("href", "")
-            
-            if command:
-                safe_print(f"  - {label}: {command}")
-            elif href:
-                safe_print(f"  - {label}: {href}")
-    
-    # Print references
-    if references:
-        safe_print("\n[参考链接]")
-        for ref in references[:5]:  # Limit to 5
-            title = ref.get("title", "")
-            href = ref.get("href", "")
-            description = ref.get("description", "")
-            
-            safe_print(f"  - {title}")
-            if href:
-                safe_print(f"    {href}")
-            if description:
-                safe_print(f"    {description}")
+    _renderer.render_message(message)
 
 
 def render_error(error_msg: str) -> None:
     """Render an error message."""
-    safe_print(f"\n{emoji('❌', '[ERROR]')} 错误: {error_msg}")
+    _renderer.render_error(error_msg)
 
 
 def handle_sse_stream(
@@ -322,7 +260,7 @@ def handle_sse_stream(
             token_buf = ""
             last_flush = time.monotonic()
         if force_newline:
-            safe_print()
+            safe_print("")
 
     try:
         _log_line(log_fp, f"[session] {session_id}")
@@ -406,6 +344,32 @@ def create_session(client: APIClient) -> Optional[str]:
     except APIError as e:
         safe_print_err(f"\n{e.user_friendly_message()}")
         return None
+
+
+def _session_exists(client: APIClient, session_id: str) -> bool:
+    """Check whether a backend chat session exists."""
+    sid = (session_id or "").strip()
+    if not sid:
+        return False
+    try:
+        client.get(f"/chat/sessions/{sid}", params={"limit": 1})
+        return True
+    except APIError:
+        return False
+
+
+def _list_sessions(client: APIClient, limit: int = 10) -> list[dict[str, Any]]:
+    """List backend sessions for local switch/resume UX."""
+    try:
+        resp = client.get("/chat/sessions", params={"limit": max(1, min(limit, 100))})
+    except APIError as e:
+        safe_print_err(f"\n{e.user_friendly_message()}")
+        return []
+
+    sessions = resp.get("sessions") if isinstance(resp, dict) else []
+    if isinstance(sessions, list):
+        return [s for s in sessions if isinstance(s, dict)]
+    return []
 
 
 def signal_handler(sig, frame):
@@ -511,11 +475,14 @@ def _try_enable_readline_history() -> None:
 def _print_repl_help() -> None:
     safe_print("\n[REPL 帮助]\n")
     safe_print("  - 单行长文本：直接输入并回车，自动按 /analyze 发起检测")
+    safe_print("  - 默认 Agent 模式：纯文本会直接交给后端意图路由（可触发 claims/evidence 等单技能）")
     safe_print("  - 粘贴多行文本：自动合并连续粘贴行后再检测")
     safe_print("  - 多行分析：输入 /paste 粘贴多行文本（默认作为 /analyze 发送）")
     safe_print("  - 多行消息：输入 /multiline 粘贴多行文本（作为普通消息发送）")
     safe_print("    - 结束并发送：输入单独一行 '.' 或 'EOF'，或输入 /send")
     safe_print("    - 取消：输入 /cancel")
+    safe_print("  - 会话管理：/session list [N]、/session switch <session_id>、/session resume [session_id]")
+    safe_print("  - 兼容旧路由：启动时加 --no-agent，可恢复“纯文本=>/analyze”行为")
     safe_print("  - 退出：/exit、quit、Ctrl+D")
     safe_print("  - 发送以 '/' 开头的普通文本：使用 '//' 开头（会自动去掉一个 '/'）")
     safe_print("  - 其他以 / 开头的命令会原样发送到后端执行（不在本地做参数校验）\n")
@@ -563,7 +530,12 @@ def chat(
         "--session-id",
         "-s",
         help="Session ID for continuing an existing conversation"
-    )
+    ),
+    no_agent: bool = typer.Option(
+        False,
+        "--no-agent",
+        help="Disable agent routing; plain text will be wrapped as /analyze",
+    ),
 ) -> None:
     """
     Interactive chat mode for multi-turn conversations.
@@ -579,6 +551,17 @@ def chat(
     signal.signal(signal.SIGINT, signal_handler)
     config = get_global_config()
 
+    # Global --local-agent semantics: run local-agent first, fallback to backend mode if unavailable.
+    if config.local_agent:
+        from app.cli.local_agent import run_local_agent_repl
+
+        handled = run_local_agent_repl()
+        if handled:
+            return
+        safe_print_err(
+            f"{emoji('⚠️', '[WARN]')} local-agent 不可用，已回退到后端编排模式。"
+        )
+
     # Best-effort local input history (Up/Down)
     _try_enable_readline_history()
     
@@ -589,10 +572,18 @@ def chat(
         retry_times=config.retry_times,
     )
     
-    # Get or create session
+    # Get or create session (prefer reusable backend session)
+    selected_from_state = False
     if not session_id:
         # Try to load last session from state
         session_id = get_state_value("last_session_id") or None
+        selected_from_state = bool(session_id)
+
+    if session_id and not _session_exists(client, session_id):
+        safe_print_err(f"{emoji('⚠️', '[WARN]')} 会话不存在或已失效，已自动创建新会话。")
+        if selected_from_state:
+            update_state("last_session_id", "")
+        session_id = None
     
     if not session_id:
         # Create new session
@@ -614,16 +605,20 @@ def chat(
     safe_print("=" * 60)
     safe_print("TruthCast 对话工作台 - 交互式分析模式")
     safe_print("=" * 60)
-    safe_print()
+    safe_print("")
     safe_print(emoji('💡', '[TIP]') + " 提示:")
     safe_print("  - 输入 /help 查看可用命令")
-    safe_print("  - 直接输入文本即可自动检测（等价于 /analyze <文本>）")
+    if no_agent:
+        safe_print("  - 当前为 --no-agent：纯文本会自动包装成 /analyze <文本>")
+    else:
+        safe_print("  - 当前为 Agent 模式：纯文本将交给后端意图路由")
     safe_print("  - 粘贴多行文本会自动合并后检测")
     safe_print("  - 仍可使用 /analyze <文本> 手动触发")
+    safe_print("  - 会话命令：/session list [N]、/session switch <id>、/session resume [id]")
     safe_print("  - 输入 /exit 或 quit 退出")
-    safe_print()
+    safe_print("")
     safe_print("=" * 60)
-    safe_print()
+    safe_print("")
     
     # REPL loop
     pending_inputs: list[str] = []
@@ -647,9 +642,9 @@ def chat(
             # Allow sending a literal leading '/'
             if raw_input.startswith("//"):
                 user_input = _normalize_input_text(raw_input[1:])
-                safe_print()  # Blank line before assistant response
+                safe_print("")  # Blank line before assistant response
                 handle_sse_stream(client, session_id, user_input)
-                safe_print()  # Blank line after response
+                safe_print("")  # Blank line after response
                 continue
 
             # Local REPL commands (routing: leading '/' => command)
@@ -658,6 +653,55 @@ def chat(
 
                 if cmd == "/help":
                     _print_repl_help()
+                    continue
+
+                if cmd in {"/session", "/sessions"}:
+                    parts = raw_input.split()
+                    action = parts[1].lower() if len(parts) >= 2 else ""
+
+                    if action == "list":
+                        limit = 10
+                        if len(parts) >= 3:
+                            try:
+                                limit = int(parts[2])
+                            except ValueError:
+                                limit = 10
+                        sessions = _list_sessions(client, limit=limit)
+                        if not sessions:
+                            safe_print("\n[EMPTY] 暂无可用会话\n")
+                            continue
+
+                        safe_print(f"\n[SESSIONS] 最近 {len(sessions)} 个会话")
+                        for item in sessions:
+                            sid = str(item.get("session_id") or "")
+                            title = str(item.get("title") or "(无标题)")
+                            created = str(item.get("created_at") or "")
+                            current = " *" if sid == session_id else ""
+                            safe_print(f"  - {sid}{current} | {title} | {created}")
+                        safe_print("")
+                        continue
+
+                    if action in {"switch", "resume"}:
+                        target_sid = ""
+                        if len(parts) >= 3:
+                            target_sid = parts[2].strip()
+                        elif action == "resume":
+                            target_sid = str(get_state_value("last_session_id") or "").strip()
+
+                        if not target_sid:
+                            safe_print("\n用法: /session switch <session_id> 或 /session resume [session_id]\n")
+                            continue
+
+                        if not _session_exists(client, target_sid):
+                            safe_print_err(f"\n{emoji('❌', '[ERROR]')} 会话不存在: {target_sid}\n")
+                            continue
+
+                        session_id = target_sid
+                        update_state("last_session_id", session_id)
+                        safe_print(f"\n{emoji('✅', '[SUCCESS]')} 已切换会话: {session_id}\n")
+                        continue
+
+                    safe_print("\n用法: /session list [N] | /session switch <session_id> | /session resume [session_id]\n")
                     continue
 
                 if cmd in {"/paste", "/multiline"}:
@@ -686,13 +730,14 @@ def chat(
                 if buffered_commands:
                     pending_inputs.extend(buffered_commands)
 
-                # Plain text is treated as analyze input by default.
-                user_input = f"/analyze {merged_text}"
+                # Agent mode: plain text goes to backend intent router.
+                # No-agent mode: preserve deterministic legacy analyze behavior.
+                user_input = f"/analyze {merged_text}" if no_agent else merged_text
 
             # Send to backend and stream response
-            safe_print()  # Blank line before assistant response
+            safe_print("")  # Blank line before assistant response
             handle_sse_stream(client, session_id, user_input)
-            safe_print()  # Blank line after response
+            safe_print("")  # Blank line after response
         
         except EOFError:
             # Handle Ctrl+D (Unix) or Ctrl+Z (Windows)

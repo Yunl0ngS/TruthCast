@@ -70,7 +70,7 @@ export const useChatStore = create<ChatState>((set) => ({
       id: newMessageId(),
       role: 'assistant',
       content:
-        '这里是"对话工作台"首版：支持用命令快速驱动现有分析流水线。\n\n- 直接输入待分析文本并发送：会自动启动分析\n- 或使用 /analyze <文本>\n- /retry_failed 重试失败阶段\n- /retry <phase> 例如 /retry report\n- /why <record_id> 解释判定原因\n- /compare <id1> <id2> 对比两条记录\n- /deep_dive <record_id> [focus] 深入分析\n\n后续会接入后端对话编排与真正的流式回答。',
+        '这里是"对话工作台"首版：支持用命令快速驱动现有分析流水线。\n\n- 直接输入新闻文本并发送：由后端智能体判断执行路径（澄清/单技能/全链路）\n- 或使用 /analyze <文本>\n- /retry_failed 重试失败阶段\n- /retry <phase> 例如 /retry report\n- /why <record_id> 解释判定原因\n- /compare <id1> <id2> 对比两条记录\n- /deep_dive <record_id> [focus] 深入分析\n\n后续会接入后端对话编排与真正的流式回答。',
       created_at: '1970-01-01T00:00:00.000Z',
       actions: [
         { type: 'link', label: '打开检测结果', href: '/result' },

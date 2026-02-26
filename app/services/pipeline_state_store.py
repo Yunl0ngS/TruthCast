@@ -177,3 +177,23 @@ def load_task(task_id: str) -> dict[str, Any] | None:
         ],
     }
 
+
+def get_phase_snapshot(task_id: str, phase: str) -> dict[str, Any] | None:
+    """读取指定 task_id + phase 的快照。"""
+    task = load_task(task_id)
+    if task is None:
+        return None
+    for snapshot in task.get("snapshots") or []:
+        if str(snapshot.get("phase") or "") == phase:
+            return snapshot
+    return None
+
+
+def get_phase_payload(task_id: str, phase: str) -> dict[str, Any] | None:
+    """读取指定 phase 的 payload。"""
+    snapshot = get_phase_snapshot(task_id, phase)
+    if snapshot is None:
+        return None
+    payload = snapshot.get("payload")
+    return payload if isinstance(payload, dict) else None
+

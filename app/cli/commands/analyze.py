@@ -59,7 +59,7 @@ def _read_input(file_path: Optional[str]) -> str:
 def _format_output(
     report_result: Dict[str, Any],
     format_type: str,
-    markdown_exporter: Optional[Callable] = None,
+    markdown_exporter: Optional[Callable[[Dict[str, Any]], str]] = None,
 ) -> str:
     """
     Format analysis result for output.
@@ -78,6 +78,20 @@ def _format_output(
         return markdown_exporter(report_result)
     else:
         return json.dumps(report_result, ensure_ascii=True, indent=2)
+
+
+def run_analysis_pipeline(client: APIClient, text: str) -> Dict[str, Any]:
+    """Run analysis pipeline and return normalized outputs.
+
+    This helper is used by local-agent mode. It preserves the historical
+    return shape with a top-level ``report`` key.
+    """
+    input_text = (text or "").strip()
+    if not input_text:
+        raise ValueError("缺少输入文本")
+
+    report_result = client.post("/detect/report", json={"text": input_text})
+    return {"report": report_result}
 
 
 def analyze(
@@ -117,7 +131,11 @@ def analyze(
     else:
         # Remote API mode
         try:
-            api_client = APIClient(config.api_base_url, timeout_sec=config.timeout_sec)
+            api_client = APIClient(
+                base_url=config.api_base,
+                timeout=float(config.timeout),
+                retry_times=config.retry_times,
+            )
             
             # Show progress
             safe_print_err(f"{emoji('🔍', '[1/4]')} 正在分析风险...")

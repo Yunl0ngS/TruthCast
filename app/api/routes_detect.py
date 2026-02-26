@@ -18,10 +18,13 @@ from app.schemas.detect import (
     ReportRequest,
     ReportResponse,
     StrategyConfig,
+    UrlDetectRequest,
+    UrlDetectResponse,
 )
 from app.services.history_store import save_report
 from app.services.pipeline import align_evidences
 from app.services.risk_snapshot import detect_risk_snapshot
+from app.services.news_crawler import crawl_news_url
 
 router = APIRouter(prefix="/detect", tags=["detect"])
 logger = get_logger("truthcast.routes_detect")
@@ -144,3 +147,40 @@ def detect_report(payload: ReportRequest) -> dict:
     )
 
     return {"record_id": record_id, **report}
+
+
+@router.post("/url", response_model=UrlDetectResponse)
+def detect_url(payload: UrlDetectRequest) -> UrlDetectResponse:
+    """抓取新闻 URL 并进行初始风险评估"""
+    crawled = crawl_news_url(payload.url)
+    if not crawled.success:
+        return UrlDetectResponse(
+            url=payload.url,
+            title="",
+            content="",
+            publish_date="",
+            success=False,
+            error_msg=crawled.error_msg
+        )
+
+    # 获取风险快照
+    with llm_slot():
+        risk_result = detect_risk_snapshot(crawled.content)
+
+    risk_resp = DetectResponse(
+        label=risk_result.label,
+        confidence=risk_result.confidence,
+        score=risk_result.score,
+        reasons=risk_result.reasons,
+        strategy=risk_result.strategy,
+        truncated=False,
+    )
+
+    return UrlDetectResponse(
+        url=payload.url,
+        title=crawled.title,
+        content=crawled.content,
+        publish_date=crawled.publish_date,
+        risk=risk_resp,
+        success=True
+    )

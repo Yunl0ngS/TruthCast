@@ -4,7 +4,7 @@ Unit tests for CLI command routing logic.
 Tests the chat command routing in app/cli/commands/chat.py for:
 - Slash commands (/analyze, /why, /compare, /help, /paste, /multiline, /send)
 - Escape sequences (//)
-- Natural language input
+- Natural language input (agent mode default)
 - Exit command variants
 """
 
@@ -138,23 +138,29 @@ class TestCommandRouting:
         assert pending == ["/exit"]
     
     def test_natural_language_input_no_processing(self) -> None:
-        """Test that plain text can be transformed to analyze input."""
+        """Agent mode default: plain text should go to backend unchanged."""
         inputs = [
             "Is this news fake?",
             "Analyze the following",
             "What happened yesterday?",
             "Tell me more",
         ]
-        
+
         for user_input in inputs:
             if user_input.startswith("//"):
                 routed = user_input[1:]
             elif user_input.startswith("/"):
                 routed = user_input
             else:
-                routed = f"/analyze {user_input}"
+                routed = user_input
 
-            assert routed.startswith("/analyze") or routed.startswith("/")
+            assert routed == user_input or routed.startswith("/")
+
+    def test_natural_language_input_with_no_agent_mode(self) -> None:
+        """No-agent compatibility: plain text still wraps to /analyze."""
+        user_input = "这是一段待分析文本"
+        routed = f"/analyze {user_input}"
+        assert routed == "/analyze 这是一段待分析文本"
     
     def test_command_with_arguments(self) -> None:
         """Test slash commands with arguments."""
@@ -209,7 +215,7 @@ class TestCommandRouting:
             ("/why", "forward_to_backend_as_command"),
             ("/help", "local_help_command"),
             ("//literal slash text", "escape_and_send_as_command"),
-            ("Natural language text", "send_as_analyze"),
+            ("Natural language text", "send_as_plain_text"),
             ("quit", "exit"),
             ("/exit", "exit"),
         ]
@@ -225,7 +231,7 @@ class TestCommandRouting:
             elif user_input.startswith("/"):
                 decision = "forward_to_backend_as_command"
             else:
-                decision = "send_as_analyze"
+                decision = "send_as_plain_text"
             
             assert decision == expected_decision, f"Failed for input: {user_input}"
 
@@ -382,11 +388,27 @@ class TestCommandParsing:
         
         cmd = user_input.split()[0].lower()
         args = user_input.split()[1:]
-        
+
         # Reconstruct
         reconstructed = f"{cmd} {' '.join(args)}"
-        
+
         assert reconstructed == user_input.lower()
+
+    def test_session_command_parsing(self) -> None:
+        """Test local session management command parsing."""
+        cmd = "/session switch chat_abc123"
+        parts = cmd.split()
+        assert parts[0] == "/session"
+        assert parts[1] == "switch"
+        assert parts[2] == "chat_abc123"
+
+    def test_session_list_command_with_limit(self) -> None:
+        """Test /session list with optional limit argument."""
+        cmd = "/session list 25"
+        parts = cmd.split()
+        assert parts[0] == "/session"
+        assert parts[1] == "list"
+        assert int(parts[2]) == 25
 
 
 class TestMultilineInputHandling:

@@ -14,6 +14,7 @@ import type {
   ReportResponse,
   SimulateResponse,
   StrategyConfig,
+  UrlDetectResponse,
 } from '@/types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://127.0.0.1:8000';
@@ -30,6 +31,11 @@ export async function detect(text: string): Promise<DetectResponse> {
 
 export async function detectWithSignal(text: string, signal?: AbortSignal): Promise<DetectResponse> {
   const { data } = await api.post<DetectResponse>('/detect', { text }, { signal });
+  return data;
+}
+
+export async function detectUrl(url: string, signal?: AbortSignal): Promise<UrlDetectResponse> {
+  const { data } = await api.post<UrlDetectResponse>('/detect/url', { url }, { signal });
   return data;
 }
 

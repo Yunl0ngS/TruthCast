@@ -43,6 +43,12 @@ ALLOWED_TOOLS = {
     "compare",
     "deep_dive",
     "export",
+    "claims_only",
+    "evidence_only",
+    "align_only",
+    "report_only",
+    "simulate",
+    "content_generate",
 }
 
 
@@ -251,6 +257,135 @@ def validate_deep_dive_args(args: dict[str, Any]) -> tuple[dict[str, Any], list[
     return validated, errors, warnings
 
 
+def validate_help_args(args: dict[str, Any]) -> tuple[dict[str, Any], list[str], list[str]]:
+    """help 工具无需参数，直接通过。"""
+    return ({}, [], [])
+
+
+def validate_export_args(args: dict[str, Any]) -> tuple[dict[str, Any], list[str], list[str]]:
+    """export 工具无需参数，直接通过。"""
+    return ({}, [], [])
+
+
+def validate_claims_only_args(args: dict[str, Any]) -> tuple[dict[str, Any], list[str], list[str]]:
+    """claims_only 工具参数校验。"""
+    errors: list[str] = []
+    warnings: list[str] = []
+    validated: dict[str, Any] = {}
+
+    text = args.get("text", "")
+    if not text:
+        errors.append("缺少必需参数: text")
+    else:
+        result = sanitize_text(text)
+        validated["text"] = result.sanitized
+        if result.was_modified:
+            warnings.extend(result.warnings)
+
+    return validated, errors, warnings
+
+
+def validate_evidence_only_args(args: dict[str, Any]) -> tuple[dict[str, Any], list[str], list[str]]:
+    """evidence_only 工具参数校验。"""
+    errors: list[str] = []
+    warnings: list[str] = []
+    validated: dict[str, Any] = {}
+
+    text = args.get("text", "")
+    if not text:
+        errors.append("缺少必需参数: text")
+    else:
+        result = sanitize_text(text)
+        validated["text"] = result.sanitized
+        if result.was_modified:
+            warnings.extend(result.warnings)
+
+    record_id = args.get("record_id", "")
+    if record_id:
+        validated["record_id"] = sanitize_record_id(record_id)
+        if validated["record_id"] != record_id:
+            warnings.append("record_id 已被清理")
+    else:
+        validated["record_id"] = ""
+
+    return validated, errors, warnings
+
+
+def validate_align_only_args(args: dict[str, Any]) -> tuple[dict[str, Any], list[str], list[str]]:
+    """align_only 工具参数校验。"""
+    errors: list[str] = []
+    warnings: list[str] = []
+    validated: dict[str, Any] = {}
+
+    record_id = args.get("record_id", "")
+    if not record_id:
+        errors.append("缺少必需参数: record_id")
+    else:
+        validated["record_id"] = sanitize_record_id(record_id)
+        if validated["record_id"] != record_id:
+            warnings.append("record_id 已被清理")
+
+    return validated, errors, warnings
+
+
+def validate_report_only_args(args: dict[str, Any]) -> tuple[dict[str, Any], list[str], list[str]]:
+    """report_only 工具参数校验。"""
+    errors: list[str] = []
+    warnings: list[str] = []
+    validated: dict[str, Any] = {}
+
+    record_id = args.get("record_id", "")
+    if not record_id:
+        errors.append("缺少必需参数: record_id")
+    else:
+        validated["record_id"] = sanitize_record_id(record_id)
+        if validated["record_id"] != record_id:
+            warnings.append("record_id 已被清理")
+
+    return validated, errors, warnings
+
+
+def validate_simulate_args(args: dict[str, Any]) -> tuple[dict[str, Any], list[str], list[str]]:
+    """simulate 工具参数校验。"""
+    errors: list[str] = []
+    warnings: list[str] = []
+    validated: dict[str, Any] = {}
+
+    record_id = args.get("record_id", "")
+    if not record_id:
+        errors.append("缺少必需参数: record_id")
+    else:
+        validated["record_id"] = sanitize_record_id(record_id)
+        if validated["record_id"] != record_id:
+            warnings.append("record_id 已被清理")
+
+    return validated, errors, warnings
+
+
+def validate_content_generate_args(args: dict[str, Any]) -> tuple[dict[str, Any], list[str], list[str]]:
+    """content_generate 工具参数校验。"""
+    errors: list[str] = []
+    warnings: list[str] = []
+    validated: dict[str, Any] = {}
+
+    record_id = args.get("record_id", "")
+    if not record_id:
+        errors.append("缺少必需参数: record_id")
+    else:
+        validated["record_id"] = sanitize_record_id(record_id)
+        if validated["record_id"] != record_id:
+            warnings.append("record_id 已被清理")
+
+    style = args.get("style", "formal")
+    allowed_styles = {"formal", "friendly", "neutral"}
+    normalized = style.strip().lower()[:MAX_STYLE_LENGTH]
+    validated["style"] = normalized if normalized in allowed_styles else "formal"
+    if validated["style"] != style:
+        warnings.append(f"style 已调整为 {validated['style']}")
+
+    return validated, errors, warnings
+
+
 VALIDATORS = {
     "analyze": validate_analyze_args,
     "load_history": validate_load_history_args,
@@ -260,6 +395,14 @@ VALIDATORS = {
     "rewrite": validate_rewrite_args,
     "compare": validate_compare_args,
     "deep_dive": validate_deep_dive_args,
+    "help": validate_help_args,
+    "export": validate_export_args,
+    "claims_only": validate_claims_only_args,
+    "evidence_only": validate_evidence_only_args,
+    "align_only": validate_align_only_args,
+    "report_only": validate_report_only_args,
+    "simulate": validate_simulate_args,
+    "content_generate": validate_content_generate_args,
 }
 
 
@@ -281,7 +424,14 @@ def validate_tool_call(tool_name: str, args: dict[str, Any]) -> ToolCallValidato
     if validator:
         validated_args, errors, warnings = validator(args)
     else:
-        validated_args = args
+        # Fail-closed: 工具在白名单但无 validator → 拒绝
+        return ToolCallValidator(
+            tool_name=tool_name,
+            args={},
+            is_valid=False,
+            errors=[f"工具 '{tool_name}' 缺少参数校验器"],
+            warnings=[],
+        )
 
     return ToolCallValidator(
         tool_name=tool_name,

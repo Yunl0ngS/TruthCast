@@ -21,6 +21,10 @@ class DetectRequest(BaseModel):
     text: str = Field(min_length=5, description="News content to analyze")
 
 
+class UrlDetectRequest(BaseModel):
+    url: str = Field(description="URL of the news to analyze")
+
+
 class DetectResponse(BaseModel):
     label: str
     confidence: float
@@ -28,6 +32,16 @@ class DetectResponse(BaseModel):
     reasons: list[str]
     strategy: StrategyConfig | None = None
     truncated: bool = False
+
+
+class UrlDetectResponse(BaseModel):
+    url: str
+    title: str
+    content: str
+    publish_date: str
+    risk: DetectResponse | None = None
+    success: bool = True
+    error_msg: str = ""
 
 
 class ClaimItem(BaseModel):

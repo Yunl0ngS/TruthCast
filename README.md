@@ -389,6 +389,96 @@ TRUTHCAST_DEBUG_SIMULATION=true
 7. **综合报告**: 汇总所有主张的对齐结果，生成最终的核查结论、场景分类（如医疗、治理、科技）和风险提示。
 8. **舆情预演**: 基于核查报告，预测该事件在特定平台（如微博、微信）上的情绪走向、叙事分支、可能引爆点，并给出针对性的应对建议。
 
+## 🖥️ CLI 命令行工具
+
+除了 Web 控制台，TruthCast 还提供了一个功能强大的命令行界面（CLI），方便在终端进行快速分析或自动化集成。
+
+### 1. 安装与配置
+
+CLI 工具已集成在后端包中。确保你已经按照“本地开发部署”步骤安装了依赖：
+
+```bash
+pip install -e .
+```
+
+### 2. 核心命令
+
+你可以使用 `truthcast` 命令调用各种功能：
+
+- **全链路分析**:
+  ```bash
+  truthcast analyze
+  # 然后粘贴待分析文本，Ctrl+D 结束输入（推荐，避免被当作文件路径）
+  ```
+- **交互式对话 (REPL)**:
+  ```bash
+  truthcast chat
+  ```
+- **查看历史**:
+  ```bash
+  truthcast history list
+  ```
+
+### 3. Agent 模式（默认）与 `--no-agent`
+
+`truthcast chat` 默认是 **Agent 模式**：
+
+- 纯文本会直接交给后端意图路由（不再强制本地包装 `/analyze`）
+- 支持在对话中自然触发单技能工具（如 claims-only / evidence-only / report-only / simulate / content）
+
+示例：
+
+```bash
+truthcast chat
+# 然后输入：
+# 只提取主张：网传明天全市停课，官方暂未发布通知。
+```
+
+如果你希望回退到旧的确定性路径（纯文本自动包装为 `/analyze <文本>`），可使用：
+
+```bash
+truthcast chat --no-agent
+```
+
+### 4. 本地 Agent 模式 (`--local-agent`)
+
+`--local-agent` 语义为：**优先使用本地 LLM Agent**，不可用时自动回退到后端编排模式。
+
+```bash
+truthcast --local-agent chat
+```
+
+说明：
+
+- 本地 Agent 需要配置 `TRUTHCAST_LLM_API_KEY`（以及可选 `TRUTHCAST_LLM_BASE_URL` / `TRUTHCAST_LLM_MODEL`）
+- 若未配置 key，CLI 会给出明确提示并自动回退，不会直接崩溃
+
+### 5. 单技能调用示例（Chat）
+
+在 `truthcast chat` 内可直接调用：
+
+```bash
+/claims_only 这里是待分析文本
+/evidence_only 这里是待分析文本
+/align_only
+/report_only
+/simulate
+/content_generate style=friendly
+```
+
+### 6. Windows GBK 终端注意事项
+
+- 推荐在 Windows 终端执行：
+  ```bat
+  chcp 936
+  ```
+- TruthCast CLI 已做 GBK/cp936 编码降级处理；若 emoji 无法显示，会自动回退为 ASCII 标签（如 `[ERROR]`）
+- `truthcast analyze` 建议走 stdin 输入（见上文），避免把中文参数误判为文件路径
+
+### 7. 环境变量
+
+CLI 同样依赖根目录下的 `.env` 文件进行 LLM 和搜索引擎配置。
+
 ## 🧪 运行测试
 
 项目包含完整的单元测试与集成测试，覆盖率高。
@@ -409,7 +499,7 @@ TRUTHCAST_DEBUG_SIMULATION=true
 
 ### v1.0.0 (2026-02-22) - 🚀 核心版本发布
 
-- **全链路闭环**: 风险快照 → 主张抽取 → 混合检索 → 证据聚合 → 证据对齐 → 综合报告 → 舆情预演。
+- **全链路闭查**: 风险快照 → 主张抽取 → 混合检索 → 证据聚合 → 证据对齐 → 综合报告 → 舆情预演。
 - **Agent 自主策略**: 文本复杂度驱动主张数量，风险分数驱动证据检索深度，LLM 自主决定证据聚合策略。
 - **现代化前端控制台**: 基于 Next.js 16 + Tailwind CSS 4 + shadcn/ui 构建，支持实时进度、历史记录回放、证据视图切换与报告导出。
 - **多引擎混合检索**: 接入 Bocha（博查）、SearXNG、Tavily、SerpAPI 等多款搜索引擎。

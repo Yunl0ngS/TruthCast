@@ -81,7 +81,7 @@ def list_history(
                 score_str = _format_score(risk_label, risk_score)
                 safe_print(f"{idx:<4} {record_id:<15} {created_at:<16} {score_str:<30} {summary}")
             
-            safe_print()
+            safe_print("")
             safe_print(emoji("💡", "[TIP]") + " 提示: 使用 'truthcast history show <record_id>' 查看详情")
             safe_print(emoji("💡", "[TIP]") + " 提示: 使用 'truthcast state bind <record_id>' 绑定记录 ID\n")
     
@@ -150,7 +150,7 @@ def _print_history_detail(data: dict) -> None:
         safe_print(f"\n  原始文本:")
         safe_print(f"    {data['summary'][:200]}...")
     
-    safe_print()
+    safe_print("")
 
 
 @history_app.command("feedback")

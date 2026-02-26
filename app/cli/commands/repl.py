@@ -24,7 +24,8 @@ def repl(
     """
     config = get_global_config()
     if config.local_agent:
-        run_local_agent_repl()
-        return
+        handled = run_local_agent_repl()
+        if handled:
+            return
 
-    chat.chat(session_id=session_id)
+    chat.chat(session_id=session_id, no_agent=False)

@@ -19,6 +19,20 @@ export type DetectResponse = {
   truncated?: boolean;
 };
 
+export type UrlDetectRequest = {
+  url: string;
+};
+
+export type UrlDetectResponse = {
+  url: string;
+  title: string;
+  content: string;
+  publish_date: string;
+  risk: DetectResponse | null;
+  success: boolean;
+  error_msg?: string;
+};
+
 export type ClaimItem = {
   claim_id: string;
   claim_text: string;

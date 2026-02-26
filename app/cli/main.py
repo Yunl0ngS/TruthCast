@@ -47,7 +47,7 @@ def config_callback(
     local_agent: bool = typer.Option(
         False,
         "--local-agent",
-        help="Run `repl` with a local LLM agent (OpenAI-compatible).",
+        help="Prefer local LLM agent mode for chat/repl; auto-fallback to backend orchestration when unavailable.",
     ),
 ) -> None:
     """Global options callback. Sets configuration for all commands."""

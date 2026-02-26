@@ -59,6 +59,44 @@ class ToolDeepDiveArgs(BaseModel):
     claim_index: int | None = Field(default=None, ge=0)
 
 
+class ToolClaimsOnlyArgs(BaseModel):
+    text: str = Field(min_length=1, max_length=12000)
+
+
+class ToolEvidenceOnlyArgs(BaseModel):
+    text: str = Field(min_length=1, max_length=12000)
+    record_id: str = Field(default="", max_length=128)
+
+
+class ToolAlignOnlyArgs(BaseModel):
+    record_id: str = Field(default="", max_length=128)
+    text: str = Field(default="", max_length=12000)
+
+
+class ToolReportOnlyArgs(BaseModel):
+    record_id: str = Field(default="", max_length=128)
+    text: str = Field(default="", max_length=12000)
+    persist: bool = Field(default=False, description="是否写入历史记录")
+
+
+class ToolSimulateArgs(BaseModel):
+    record_id: str = Field(default="", max_length=128)
+    text: str = Field(default="", max_length=12000)
+
+
+class ToolContentGenerateArgs(BaseModel):
+    record_id: str = Field(default="", max_length=128)
+    style: str = Field(default="formal", max_length=32)
+    text: str = Field(default="", max_length=12000)
+    detail: str = Field(default="full", max_length=16)
+    force: bool = Field(default=False)
+    reuse_only: bool = Field(default=False)
+    operation: str = Field(default="generate", max_length=16)
+    section: str = Field(default="", max_length=32)
+    variant: str = Field(default="", max_length=32)
+    faq_range: str = Field(default="", max_length=32)
+    platforms: str = Field(default="", max_length=128)
+
 ToolName = Literal[
     "analyze",
     "load_history",
@@ -69,15 +107,19 @@ ToolName = Literal[
     "compare",
     "deep_dive",
     "help",
+    "export",
+    "claims_only",
+    "evidence_only",
+    "align_only",
+    "report_only",
+    "simulate",
+    "content_generate",
 ]
 
 
 def _is_analyze_intent(text: str) -> bool:
     t = text.strip()
-    if t.startswith("/analyze"):
-        return True
-    # 粗略启发：超长输入大概率是待分析文本
-    return len(t) >= 180
+    return t.startswith("/analyze")
 
 
 def _extract_analyze_text(text: str) -> str:
@@ -85,6 +127,46 @@ def _extract_analyze_text(text: str) -> str:
     if t.startswith("/analyze"):
         return t[len("/analyze") :].strip()
     return t
+
+
+def _extract_payload_text(raw_text: str) -> str:
+    text = raw_text.strip()
+    for sep in ("：", ":"):
+        if sep in text:
+            _, right = text.split(sep, 1)
+            candidate = right.strip()
+            if candidate:
+                return candidate
+    return text
+
+
+def _extract_payload_text_if_explicit(raw_text: str, min_len: int = 20) -> str:
+    text = raw_text.strip()
+    for sep in ("：", ":"):
+        if sep in text:
+            _, right = text.split(sep, 1)
+            candidate = right.strip()
+            if len(candidate) >= min_len:
+                return candidate
+            return ""
+    return ""
+
+
+def _parse_bool_flag(raw: str) -> bool:
+    value = (raw or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _parse_command_kv(tokens: list[str]) -> dict[str, str]:
+    kv: dict[str, str] = {}
+    for token in tokens:
+        if "=" not in token:
+            continue
+        key, value = token.split("=", 1)
+        key_norm = key.strip().lower()
+        if key_norm:
+            kv[key_norm] = value.strip()
+    return kv
 
 
 def parse_tool(text: str, session_meta: dict[str, Any] | None = None) -> tuple[ToolName, dict[str, Any]]:
@@ -160,36 +242,134 @@ def parse_tool(text: str, session_meta: dict[str, Any] | None = None) -> tuple[T
             record_id = str(meta.get("record_id") or meta.get("bound_record_id") or "")
         return ("deep_dive", {"record_id": record_id, "focus": focus, "claim_index": claim_index})
 
+    if t.startswith("/claims_only") or t.startswith("/claims-only"):
+        value = t.split(" ", 1)
+        claim_text = value[1].strip() if len(value) >= 2 else ""
+        return ("claims_only", {"text": claim_text})
+
+    if t.startswith("/evidence_only") or t.startswith("/evidence-only"):
+        value = t.split(" ", 1)
+        evidence_text = value[1].strip() if len(value) >= 2 else ""
+        fallback_record_id = str(meta.get("record_id") or meta.get("bound_record_id") or "")
+        return ("evidence_only", {"text": evidence_text, "record_id": fallback_record_id})
+
+    if t.startswith("/align_only") or t.startswith("/align-only"):
+        parts = re.split(r"\s+", t)
+        record_id = parts[1].strip() if len(parts) >= 2 else ""
+        if not record_id:
+            record_id = str(meta.get("record_id") or meta.get("bound_record_id") or "")
+        return ("align_only", {"record_id": record_id})
+
+    if t.startswith("/report_only") or t.startswith("/report-only"):
+        parts = re.split(r"\s+", t)
+        record_id = parts[1].strip() if len(parts) >= 2 else ""
+        if not record_id:
+            record_id = str(meta.get("record_id") or meta.get("bound_record_id") or "")
+        return ("report_only", {"record_id": record_id})
+
+    if t.startswith("/simulate"):
+        parts = re.split(r"\s+", t)
+        record_id = parts[1].strip() if len(parts) >= 2 else ""
+        if not record_id:
+            record_id = str(meta.get("record_id") or meta.get("bound_record_id") or "")
+        return ("simulate", {"record_id": record_id})
+
+    if t.startswith("/content_generate") or t.startswith("/content-generate") or (t.startswith("/content") and not t.startswith("/content_show") and not t.startswith("/content-show")):
+        parts = re.split(r"\s+", t)
+        record_id = str(meta.get("record_id") or meta.get("bound_record_id") or "")
+        kv = _parse_command_kv(parts[1:])
+        style = kv.get("style", "formal")
+        detail = kv.get("detail", "full")
+        force = _parse_bool_flag(kv.get("force", "false"))
+        reuse_only = _parse_bool_flag(kv.get("reuse_only", "false"))
+        text_arg = kv.get("text", "")
+        operation = "generate"
+        if t.startswith("/content") and not t.startswith("/content_generate") and not t.startswith("/content-generate"):
+            operation = "generate" if force else "show"
+        return (
+            "content_generate",
+            {
+                "record_id": record_id,
+                "style": style,
+                "detail": detail,
+                "force": force,
+                "reuse_only": reuse_only,
+                "text": text_arg,
+                "operation": operation,
+            },
+        )
+
+    if t.startswith("/content_show") or t.startswith("/content-show"):
+        parts = re.split(r"\s+", t)
+        section = parts[1].strip().lower() if len(parts) >= 2 else ""
+        variant = parts[2].strip().lower() if len(parts) >= 3 else ""
+        kv = _parse_command_kv(parts[1:])
+        faq_range = kv.get("range", variant if section == "faq" else "")
+        platforms = kv.get("platforms", variant if section == "scripts" else "")
+        return (
+            "content_generate",
+            {
+                "operation": "show",
+                "section": section,
+                "variant": variant,
+                "faq_range": faq_range,
+                "platforms": platforms,
+                "detail": kv.get("detail", "full"),
+                "style": kv.get("style", "formal"),
+                "record_id": str(meta.get("record_id") or meta.get("bound_record_id") or ""),
+            },
+        )
+
     if _is_analyze_intent(t):
         analyze_text = _extract_analyze_text(t)
         return ("analyze", {"text": analyze_text})
 
     intent, intent_args = classify_intent(t)
     tool_name = _intent_to_tool(intent)
+    # 路由保护：当用户给出“检索/搜集证据 + 长文本载荷”时，优先执行 evidence_only，
+    # 避免误路由到 more_evidence（建议模式）。
+    if tool_name == "more_evidence":
+        payload_text = _extract_payload_text(t)
+        if payload_text and payload_text != t and len(payload_text) >= 30:
+            return ("evidence_only", {"text": payload_text, "record_id": str(meta.get("record_id") or meta.get("bound_record_id") or "")})
     if tool_name != "help":
-        args = _merge_intent_args(tool_name, intent_args, meta)
+        args = _merge_intent_args(tool_name, intent_args, meta, t)
         return (tool_name, args)
 
-    return ("help", {})
+    return ("help", {"clarify": True, "text": t})
 
 
 def _intent_to_tool(intent: IntentName) -> ToolName:
-    """将意图名称映射到工具名称。"""
+    """将意图名称映射到工具名称。
+    注意:
+    - content: 映射到 content_generate（V2已完成后端独立工具）
+    - rewrite/load_history: 仅支持命令格式（/rewrite, /load_history），不在意图识别范围内
+    """
     mapping: dict[IntentName, ToolName] = {
         "why": "why",
         "compare": "compare",
         "deep_dive": "deep_dive",
-        "content": "help",
+        "content": "content_generate",  # 修复：content 现在映射到 content_generate 独立工具
         "more_evidence": "more_evidence",
         "list": "list",
         "analyze": "analyze",
+        "claims_only": "claims_only",
+        "evidence_only": "evidence_only",
+        "align_only": "align_only",
+        "report_only": "report_only",
+        "simulate": "simulate",
         "help": "help",
         "unknown": "help",
     }
     return mapping.get(intent, "help")
 
 
-def _merge_intent_args(tool_name: ToolName, intent_args: dict[str, Any], meta: dict[str, Any]) -> dict[str, Any]:
+def _merge_intent_args(
+    tool_name: ToolName,
+    intent_args: dict[str, Any],
+    meta: dict[str, Any],
+    raw_text: str,
+) -> dict[str, Any]:
     """合并意图参数与 session meta。"""
     bound_record_id = str(meta.get("record_id") or meta.get("bound_record_id") or "")
 
@@ -217,9 +397,77 @@ def _merge_intent_args(tool_name: ToolName, intent_args: dict[str, Any], meta: d
         return {"limit": intent_args.get("limit", 10)}
 
     if tool_name == "analyze":
-        return {"text": intent_args.get("text", "")}
+        text = str(intent_args.get("text") or "").strip() or _extract_payload_text(raw_text)
+        return {"text": text}
+
+    if tool_name == "claims_only":
+        text = str(intent_args.get("text") or "").strip() or _extract_payload_text(raw_text)
+        return {"text": text}
+
+    if tool_name == "evidence_only":
+        text = str(intent_args.get("text") or "").strip() or _extract_payload_text(raw_text)
+        return {
+            "text": text,
+            "record_id": intent_args.get("record_id") or bound_record_id,
+        }
+
+    if tool_name in {"align_only", "report_only", "simulate"}:
+        text = str(intent_args.get("text") or "").strip() or _extract_payload_text(raw_text)
+        return {"record_id": intent_args.get("record_id") or bound_record_id, "text": text}
+
+    if tool_name == "content_generate":
+        explicit_text = str(intent_args.get("text") or "").strip()
+        text = explicit_text or _extract_payload_text_if_explicit(raw_text)
+        return {
+            "record_id": intent_args.get("record_id") or bound_record_id,
+            "style": intent_args.get("style", "formal"),
+            "text": text,
+            "detail": intent_args.get("detail", "full"),
+            "force": bool(intent_args.get("force", False)),
+            "reuse_only": bool(intent_args.get("reuse_only", False)),
+            "operation": intent_args.get("operation", "generate"),
+            "section": intent_args.get("section", ""),
+            "variant": intent_args.get("variant", ""),
+            "faq_range": intent_args.get("faq_range", ""),
+            "platforms": intent_args.get("platforms", ""),
+        }
 
     return intent_args
+
+
+def build_intent_clarify_message(raw_text: str) -> ChatMessage:
+    preview = _extract_payload_text(raw_text)
+    if len(preview) > 180:
+        preview = preview[:177] + "..."
+    return ChatMessage(
+        role="assistant",
+        content=(
+            "我收到一段文本，但当前意图还不够明确。\n\n"
+            "你希望我怎么处理这段内容？\n"
+            "- 做完整分析（风险快照->主张->证据->对齐->报告）\n"
+            "- 或直接选择单技能（主张/证据/对齐/报告/预演/应对内容）\n\n"
+            f"文本预览：{preview}"
+        ),
+        actions=[
+            ChatAction(type="command", label="完整分析", command=f"/analyze {preview}"),
+            ChatAction(type="command", label="仅提取主张", command=f"/claims_only {preview}"),
+            ChatAction(type="command", label="仅检索证据", command=f"/evidence_only {preview}"),
+            ChatAction(type="command", label="仅证据对齐", command="/align_only"),
+            ChatAction(type="command", label="仅生成报告", command="/report_only"),
+            ChatAction(type="command", label="仅舆情预演", command="/simulate"),
+            ChatAction(type="command", label="仅应对内容", command="/content_generate"),
+            ChatAction(type="command", label="解释判定原因", command="/why"),
+            ChatAction(type="command", label="补充更多证据", command="/more_evidence"),
+            ChatAction(type="command", label="改写解释版本", command="/rewrite short"),
+            ChatAction(type="command", label="深入分析焦点", command="/deep_dive"),
+            ChatAction(type="command", label="对比两条记录", command="/compare"),
+            ChatAction(type="command", label="加载历史记录", command="/load_history"),
+            ChatAction(type="command", label="查看历史记录", command="/list"),
+            ChatAction(type="command", label="查看帮助", command="/help"),
+        ],
+        references=[],
+        meta={"intent": "clarify", "input_preview": preview},
+    )
 
 
 def build_help_message() -> ChatMessage:
@@ -229,17 +477,28 @@ def build_help_message() -> ChatMessage:
             "当前对话工作台已启用后端工具白名单编排（V2）。\n\n"
             "可用命令：\n"
             "- /analyze <待分析文本>：发起全链路分析\n"
-            "- /load_history <record_id>：加载历史记录到前端上下文\n"
-            "- /why <record_id>：解释为什么给出该风险/结论（最小可用）\n"
+            "- /load_history <record_id>：加载历史记录到前端上下文（仅命令）\n"
+            "- /why <record_id>：解释为什么给出该风险/结论（支持自然语言：“为什么判定高风险”）\n"
             "- /list [N]：列出最近 N 条历史记录的 record_id（默认 10，例如 /list 20）\n"
             "- /more_evidence：基于当前上下文，给出补充证据的下一步动作\n"
-            "- /rewrite [short|neutral|friendly]：改写解释版本\n"
+            "- /rewrite [short|neutral|friendly]：改写解释版本（仅命令）\n"
             "- /compare <record_id_1> <record_id_2>：对比两条历史记录的分析结果\n"
             "- /deep_dive <record_id> [focus] [claim_index]：深入分析某一焦点领域\n"
             "  - focus 可选：general（默认）/evidence/claims/timeline/sources\n"
             "  - claim_index：指定深入分析第几条主张（从0开始）\n\n"
+            "- /claims_only <文本>：仅提取主张\n"
+            "- /evidence_only <文本>：仅检索证据（复用会话主张）\n"
+            "- /align_only [record_id]：仅做证据对齐\n"
+            "- /report_only [record_id]：仅生成报告\n"
+            "- /simulate [record_id]：仅执行舆情预演\n"
+            "- /content_generate [style=...]：仅生成应对内容\n\n"
+            "- /content [style=... detail=brief|full force=true|false reuse_only=true|false]：CLI 友好应对内容\n"
+            "- /content_show clarification short|medium|long：查看澄清稿指定版本\n"
+            "- /content_show faq 1-5：查看 FAQ 区间\n"
+            "- /content_show scripts weibo,wechat：查看指定平台话术\n\n"
+            "标注「仅命令」的工具不支持自然语言，其他工具均支持自然语言表达。\n\n"
             "record_id 来源：分析完成后会写入历史记录；也可以用 /list 查询后再 /load_history {record_id}。\n\n"
-            "你也可以直接粘贴长文本（系统会自动视为待分析内容）。"
+            "你也可以直接粘贴长文本（系统会先询问你要完整分析还是单技能处理）。"
         ),
         actions=[
             ChatAction(type="link", label="检测结果", href="/result"),
@@ -926,4 +1185,3 @@ def run_deep_dive(args: ToolDeepDiveArgs) -> ChatMessage:
         references=refs,
         meta={"record_id": record["id"], "focus": focus, "blocks": blocks},
     )
-
