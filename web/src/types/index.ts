@@ -8,6 +8,10 @@ export type StrategyConfig = {
   summary_target_min: number;
   summary_target_max: number;
   enable_summarization: boolean;
+  is_news: boolean;
+  news_confidence: number;
+  detected_text_type: string;
+  news_reason: string;
 };
 
 export type DetectResponse = {

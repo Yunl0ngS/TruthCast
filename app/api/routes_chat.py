@@ -2055,7 +2055,7 @@ def chat(payload: ChatRequest) -> ChatResponse:
 
     # 1) 风险快照
     with llm_slot():
-        risk = detect_risk_snapshot(analyze_text)
+        risk = detect_risk_snapshot(analyze_text, enable_news_gate=True)
 
     # 2) 主张
     with llm_slot():
@@ -2351,7 +2351,7 @@ def chat_session_stream(session_id: str, payload: ChatMessageCreateRequest) -> S
                 meta={"source": "chat"},
             )
             with llm_slot():
-                risk = detect_risk_snapshot(analyze_text)
+                risk = detect_risk_snapshot(analyze_text, force=args.force, enable_news_gate=True)
             yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 风险快照：完成（{risk.label}，score={risk.score}）\n', 'session_id': session_id}).model_dump_json()}\n\n"
             yield f"data: {ChatStreamEvent(type='stage', data={'session_id': session_id, 'stage': 'risk', 'status': 'done'}).model_dump_json()}\n\n"
             risk_reasons = [str(item) for item in (risk.reasons or []) if str(item).strip()]
@@ -2779,7 +2779,7 @@ def chat_stream(payload: ChatRequest) -> StreamingResponse:
             # 2) 风险快照
             yield f"data: {ChatStreamEvent(type='token', data={'content': '- 风险快照：计算中…\n', 'session_id': session_id}).model_dump_json()}\n\n"
             with llm_slot():
-                risk = detect_risk_snapshot(analyze_text)
+                risk = detect_risk_snapshot(analyze_text, enable_news_gate=True)
             yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 风险快照：完成（{risk.label}，score={risk.score}）\n', 'session_id': session_id}).model_dump_json()}\n\n"
 
             # 3) 主张

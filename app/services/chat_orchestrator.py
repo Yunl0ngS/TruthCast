@@ -25,6 +25,7 @@ from app.services.risk_snapshot import detect_risk_snapshot
 
 class ToolAnalyzeArgs(BaseModel):
     text: str = Field(min_length=1, max_length=12000)
+    force: bool = Field(default=False)
 
 
 class ToolLoadHistoryArgs(BaseModel):
@@ -125,7 +126,12 @@ def _is_analyze_intent(text: str) -> bool:
 def _extract_analyze_text(text: str) -> str:
     t = text.strip()
     if t.startswith("/analyze"):
-        return t[len("/analyze") :].strip()
+        body = t[len("/analyze") :].strip()
+        if body.startswith("force=true"):
+            return body[len("force=true") :].strip()
+        if body.startswith("force=false"):
+            return body[len("force=false") :].strip()
+        return body
     return t
 
 
@@ -322,7 +328,8 @@ def parse_tool(text: str, session_meta: dict[str, Any] | None = None) -> tuple[T
 
     if _is_analyze_intent(t):
         analyze_text = _extract_analyze_text(t)
-        return ("analyze", {"text": analyze_text})
+        force_flag = bool(re.search(r"^/analyze\s+force=true\b", t))
+        return ("analyze", {"text": analyze_text, "force": force_flag})
 
     intent, intent_args = classify_intent(t)
     tool_name = _intent_to_tool(intent)
@@ -892,8 +899,28 @@ def run_analyze_stream(session_id: str, args: ToolAnalyzeArgs) -> Iterator[str]:
     yield f"data: {ChatStreamEvent(type='token', data={'content': '已收到文本，开始分析…\n', 'session_id': session_id}).model_dump_json()}\n\n"
 
     with llm_slot():
-        risk = detect_risk_snapshot(text)
+        risk = detect_risk_snapshot(text, force=args.force, enable_news_gate=True)
     yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 风险快照：完成（{risk.label}，score={risk.score}）\n', 'session_id': session_id}).model_dump_json()}\n\n"
+
+    if (not args.force) and risk.strategy and risk.strategy.is_news is False:
+        reason = risk.strategy.news_reason or "文本新闻特征不足"
+        msg = ChatMessage(
+            role="assistant",
+            content=(
+                "检测到该文本不属于新闻体裁，已停止自动全链路检测。\n"
+                f"- 判定类型: {risk.strategy.detected_text_type}\n"
+                f"- 原因: {reason}\n\n"
+                "如需继续，可显式使用单技能命令（如 /claims_only）。"
+            ),
+            actions=[
+                ChatAction(type="command", label="仅提取主张", command=f"/claims_only {text[:200]}"),
+                ChatAction(type="command", label="查看帮助", command="/help"),
+            ],
+            references=[],
+        )
+        event = ChatStreamEvent(type="message", data={"session_id": session_id, "message": msg.model_dump()})
+        yield f"data: {event.model_dump_json()}\n\n"
+        return
 
     with llm_slot():
         claims = orchestrator.run_claims(text, strategy=risk.strategy)

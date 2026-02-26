@@ -133,6 +133,19 @@ def validate_analyze_args(args: dict[str, Any]) -> tuple[dict[str, Any], list[st
         if result.was_modified:
             warnings.extend(result.warnings)
 
+    if "force" in args:
+        force_raw = args.get("force")
+        if isinstance(force_raw, bool):
+            validated["force"] = force_raw
+        else:
+            normalized = str(force_raw).strip().lower()
+            if normalized in {"true", "1", "yes", "on"}:
+                validated["force"] = True
+            elif normalized in {"false", "0", "no", "off"}:
+                validated["force"] = False
+            else:
+                warnings.append("force 参数无效，已使用默认 false")
+
     return validated, errors, warnings
 
 

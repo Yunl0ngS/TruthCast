@@ -58,7 +58,7 @@ def detect_fake_news(payload: DetectRequest) -> DetectResponse:
         return cached.model_copy(update={"truncated": truncated})
 
     with llm_slot():
-        result = detect_risk_snapshot(text)
+        result = detect_risk_snapshot(text, force=payload.force, enable_news_gate=True)
     resp = DetectResponse(
         label=result.label,
         confidence=result.confidence,

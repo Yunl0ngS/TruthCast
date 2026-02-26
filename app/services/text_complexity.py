@@ -40,7 +40,9 @@ TRUST_KEYWORDS = [
 ]
 
 
-def analyze_text_complexity_with_llm(text: str) -> tuple[str, str, int] | None:
+def analyze_text_meta_with_llm(
+    text: str,
+) -> tuple[str, str, int, bool, float, str, str] | None:
     api_key = os.getenv("TRUTHCAST_LLM_API_KEY", "").strip()
     if not api_key:
         logger.info("复杂度分析：TRUTHCAST_LLM_API_KEY为空，跳过LLM")
@@ -56,13 +58,19 @@ def analyze_text_complexity_with_llm(text: str) -> tuple[str, str, int] | None:
     max_claims_limit = 10
     
     prompt = (
-        "你是文本复杂度分析器。分析输入文本的核查复杂度，输出严格JSON。\n"
+        "你是文本元分析器。分析输入文本的核查复杂度与新闻体裁，输出严格JSON。\n"
         "判断标准：\n"
         "1. simple: 单一主题、单一实体、连贯叙述 → 2-3条主张\n"
         "2. medium: 2-3个关键实体、有时间线或多事件 → 4-5条主张\n"
         "3. complex: 多实体(>3)、多时间线、多转折、多独立事件 → 6-8条主张\n"
         "注意：纯数据(百分比、金额)不增加复杂度，只有额外的独立实体/事件/时间线才增加。\n"
-        f"输出格式：{{\"level\":\"simple|medium|complex\",\"max_claims\":2-8,\"reason\":\"中文理由\"}}\n"
+        "同时判断文本是否为新闻体裁（news/opinion/chat/ad/other）：\n"
+        "- news: 事件事实报道，通常包含时间/地点/人物/来源\n"
+        "- opinion: 评论观点为主\n"
+        "- chat: 对话/闲聊\n"
+        "- ad: 广告营销\n"
+        "- other: 其他\n"
+        f"输出格式：{{\"complexity\":{{\"level\":\"simple|medium|complex\",\"max_claims\":2-8,\"reason\":\"中文理由\"}},\"news_gate\":{{\"is_news\":true|false,\"confidence\":0-1,\"detected_type\":\"news|opinion|chat|ad|other\",\"reason\":\"中文理由\"}}}}\n"
         f"max_claims 范围: 2-{min(8, max_claims_limit)}"
     )
     
@@ -110,26 +118,64 @@ def analyze_text_complexity_with_llm(text: str) -> tuple[str, str, int] | None:
             _record_complexity_trace("llm_parse_error", {"content": content})
             return None
         
-        level = str(parsed.get("level", "medium")).strip().lower()
+        complexity_obj = parsed.get("complexity", {}) if isinstance(parsed, dict) else {}
+        gate_obj = parsed.get("news_gate", {}) if isinstance(parsed, dict) else {}
+
+        level = str((complexity_obj or {}).get("level", "medium")).strip().lower()
         if level not in {"simple", "medium", "complex"}:
             level = "medium"
-        
+
         try:
-            max_claims = int(parsed.get("max_claims", 5))
+            max_claims = int((complexity_obj or {}).get("max_claims", 5))
             max_claims = max(2, min(min(8, max_claims_limit), max_claims))
         except (TypeError, ValueError):
             max_claims = 5
-        
-        reason = str(parsed.get("reason", "LLM判定")).strip()
-        
-        logger.info("复杂度分析：LLM判定成功，level=%s, max_claims=%s", level, max_claims)
-        _record_complexity_trace("llm_response", {"parsed": parsed, "level": level, "max_claims": max_claims})
-        return level, reason, max_claims
+
+        reason = str((complexity_obj or {}).get("reason", "LLM判定")).strip()
+
+        is_news = bool((gate_obj or {}).get("is_news", True))
+        try:
+            news_confidence = float((gate_obj or {}).get("confidence", 0.5))
+        except (TypeError, ValueError):
+            news_confidence = 0.5
+        news_confidence = max(0.0, min(1.0, news_confidence))
+        detected_text_type = str((gate_obj or {}).get("detected_type", "news")).strip().lower() or "news"
+        if detected_text_type not in {"news", "opinion", "chat", "ad", "other"}:
+            detected_text_type = "other"
+        news_reason = str((gate_obj or {}).get("reason", "LLM判定")).strip() or "LLM判定"
+
+        logger.info(
+            "文本元分析：LLM判定成功，level=%s, max_claims=%s, is_news=%s, type=%s",
+            level,
+            max_claims,
+            is_news,
+            detected_text_type,
+        )
+        _record_complexity_trace(
+            "llm_response",
+            {
+                "parsed": parsed,
+                "level": level,
+                "max_claims": max_claims,
+                "is_news": is_news,
+                "news_confidence": news_confidence,
+                "detected_text_type": detected_text_type,
+            },
+        )
+        return level, reason, max_claims, is_news, news_confidence, detected_text_type, news_reason
         
     except Exception as exc:
         logger.warning("复杂度分析：LLM响应解析失败，error=%s", exc)
         _record_complexity_trace("llm_error", {"error": str(exc)})
         return None
+
+
+def analyze_text_complexity_with_llm(text: str) -> tuple[str, str, int] | None:
+    meta = analyze_text_meta_with_llm(text)
+    if meta is None:
+        return None
+    level, reason, max_claims, *_ = meta
+    return level, reason, max_claims
 
 
 def _record_complexity_trace(stage: str, payload: dict[str, Any]) -> None:
@@ -224,9 +270,68 @@ def analyze_text_complexity(text: str) -> tuple[str, str, int]:
     return analyze_text_complexity_rule_based(text)
 
 
+def detect_news_type_rule_based(text: str) -> tuple[bool, float, str, str]:
+    t = text.strip()
+    if not t:
+        return False, 0.3, "other", "文本为空"
+
+    news_score = 0
+    if re.search(r"\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[日]?|\d{1,2}月\d{1,2}日|今天|昨日|今天|昨晚", t):
+        news_score += 2
+    if re.search(r"在[\u4e00-\u9fa5]{2,10}|于[\u4e00-\u9fa5]{2,10}|警方|记者|报道|通报|发布|表示|称", t):
+        news_score += 2
+    if re.search(r"评论员|观点|我认为|我觉得|应该|必须", t):
+        news_score -= 2
+    if re.search(r"优惠|下单|购买|点击|立即|限时", t):
+        news_score -= 3
+    if len(t) >= 120:
+        news_score += 1
+
+    if news_score >= 3:
+        return True, 0.8, "news", "包含明显新闻要素（时间/来源/事件）"
+    if news_score <= -2:
+        detected_type = "ad" if re.search(r"优惠|下单|购买|点击|立即|限时", t) else "opinion"
+        return False, 0.75, detected_type, "文本更接近广告/观点表达，不是新闻报道"
+    return False, 0.6, "other", "新闻特征不足，建议补充来源与事件信息"
+
+
+def analyze_text_meta(text: str) -> tuple[str, str, int, bool, float, str, str]:
+    llm_meta = analyze_text_meta_with_llm(text)
+    if llm_meta is not None:
+        logger.info("文本元分析：使用LLM结果")
+        return llm_meta
+
+    logger.info("文本元分析：LLM不可用，回退规则计算")
+    level, reason, max_claims = analyze_text_complexity_rule_based(text)
+    is_news, conf, detected_type, news_reason = detect_news_type_rule_based(text)
+    return level, reason, max_claims, is_news, conf, detected_type, news_reason
+
+
 def infer_strategy(text: str, score: int, label: str) -> StrategyConfig:
     # score 为风险分（越高越危险），高风险时检索更多证据
     complexity_level, complexity_reason, max_claims = analyze_text_complexity(text)
+    return build_strategy_from_complexity_and_risk(
+        score=score,
+        label=label,
+        complexity_level=complexity_level,
+        complexity_reason=complexity_reason,
+        max_claims=max_claims,
+    )
+
+
+def build_strategy_from_complexity_and_risk(
+    *,
+    score: int,
+    label: str,
+    complexity_level: str,
+    complexity_reason: str,
+    max_claims: int,
+    is_news: bool = True,
+    news_confidence: float = 0.5,
+    detected_text_type: str = "news",
+    news_reason: str = "",
+) -> StrategyConfig:
+    del label
     
     if score >= 65:
         evidence_per_claim = 10
@@ -257,6 +362,10 @@ def infer_strategy(text: str, score: int, label: str) -> StrategyConfig:
         summary_target_min=1,
         summary_target_max=summary_target_max,
         enable_summarization=True,
+        is_news=is_news,
+        news_confidence=news_confidence,
+        detected_text_type=detected_text_type,
+        news_reason=news_reason,
     )
 
 
@@ -264,7 +373,7 @@ def infer_strategy_from_score(score: int, label: str) -> StrategyConfig:
     return infer_strategy("", score, label)
 
 
-def score_text(text: str) -> ScoreResult:
+def score_text_risk_only(text: str) -> tuple[str, float, int, list[str]]:
     # score 表示风险程度：越高风险越大（0=安全，100=极高风险）
     value = 50
     reasons: list[str] = []
@@ -296,5 +405,10 @@ def score_text(text: str) -> ScoreResult:
     if not reasons:
         reasons.append("未发现明显风险或可信信号，建议人工复核")
 
+    return label, confidence, value, reasons
+
+
+def score_text(text: str) -> ScoreResult:
+    label, confidence, value, reasons = score_text_risk_only(text)
     strategy = infer_strategy(text, value, label)
     return ScoreResult(label=label, confidence=confidence, score=value, reasons=reasons, strategy=strategy)

@@ -472,6 +472,21 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       // Wait for detect to complete to get strategy
       await detectPromise;
       const currentStrategy = get().strategy;
+
+      if (currentStrategy && currentStrategy.is_news === false) {
+        const reason = currentStrategy.news_reason || '文本新闻特征不足';
+        toast.warning(`已停止自动检测流程：${reason}`);
+        setPhase('claims', 'idle');
+        setPhase('evidence', 'idle');
+        setPhase('report', 'idle');
+        setPhase('simulation', 'idle');
+        setPhase('content', 'idle');
+        void _persistPhaseSnapshot(get, 'claims', 'idle', {
+          error_message: 'news_gate_blocked',
+          payload: { reason, detected_text_type: currentStrategy.detected_text_type },
+        });
+        return;
+      }
       
       try {
         setPhase('claims', 'running');

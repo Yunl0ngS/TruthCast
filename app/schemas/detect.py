@@ -16,9 +16,15 @@ class StrategyConfig(BaseModel):
     summary_target_max: int = Field(default=5, ge=1, description="证据聚合目标最大数量")
     enable_summarization: bool = Field(default=True, description="是否启用证据聚合")
 
+    is_news: bool = Field(default=True, description="是否判定为新闻文本")
+    news_confidence: float = Field(default=0.5, ge=0.0, le=1.0, description="新闻体裁判定置信度")
+    detected_text_type: str = Field(default="news", description="文本类型: news/opinion/chat/ad/other")
+    news_reason: str = Field(default="", description="新闻体裁判定理由")
+
 
 class DetectRequest(BaseModel):
     text: str = Field(min_length=5, description="News content to analyze")
+    force: bool = Field(default=False, description="是否强制继续检测（忽略新闻体裁门控）")
 
 
 class UrlDetectRequest(BaseModel):

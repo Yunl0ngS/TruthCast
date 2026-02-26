@@ -493,3 +493,12 @@ def test_parse_tool_content_generate_natural_language_with_payload_sets_text():
     tool, args = parse_tool("帮我生成应对内容：这是一段需要生成应对内容的新闻正文，长度足够触发正文提取。")
     assert tool == "content_generate"
     assert "新闻正文" in str(args.get("text") or "")
+
+
+def test_parse_tool_analyze_force_true():
+    from app.services.chat_orchestrator import parse_tool
+
+    tool, args = parse_tool("/analyze force=true 这是一条测试新闻文本")
+    assert tool == "analyze"
+    assert args.get("force") is True
+    assert "测试新闻文本" in str(args.get("text") or "")

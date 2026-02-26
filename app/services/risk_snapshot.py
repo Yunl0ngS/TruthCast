@@ -6,7 +6,12 @@ from typing import Any
 from urllib import error, request
 
 from app.core.logger import get_logger
-from app.services.text_complexity import ScoreResult, infer_strategy, score_text
+from app.services.text_complexity import (
+    ScoreResult,
+    analyze_text_meta,
+    build_strategy_from_complexity_and_risk,
+    score_text_risk_only,
+)
 from app.services.json_utils import serialize_for_json
 
 logger = get_logger("truthcast.risk_snapshot")
@@ -41,8 +46,68 @@ def _normalize_label(label_raw: str) -> str:
     return "needs_context"
 
 
-def detect_risk_snapshot(text: str) -> ScoreResult:
+def detect_risk_snapshot(text: str, force: bool = False, enable_news_gate: bool = False) -> ScoreResult:
     _record_risk_trace("input", {"text": text})
+
+    complexity_level, complexity_reason, max_claims, is_news, news_confidence, detected_text_type, news_reason = analyze_text_meta(
+        text
+    )
+    _record_risk_trace(
+        "complexity_output",
+        {
+            "complexity_level": complexity_level,
+            "complexity_reason": complexity_reason,
+            "max_claims": max_claims,
+            "is_news": is_news,
+            "news_confidence": news_confidence,
+            "detected_text_type": detected_text_type,
+            "news_reason": news_reason,
+            "force": force,
+            "enable_news_gate": enable_news_gate,
+        },
+    )
+
+    if enable_news_gate and (not force) and (not is_news):
+        strategy = build_strategy_from_complexity_and_risk(
+            score=50,
+            label="needs_context",
+            complexity_level=complexity_level,
+            complexity_reason=complexity_reason,
+            max_claims=max_claims,
+            is_news=is_news,
+            news_confidence=news_confidence,
+            detected_text_type=detected_text_type,
+            news_reason=news_reason,
+        )
+        blocked = ScoreResult(
+            label="needs_context",
+            score=50,
+            confidence=round(news_confidence, 2),
+            reasons=[
+                f"文本类型判定为 {detected_text_type}，默认不自动进入新闻检测流程。",
+                news_reason or "新闻体裁特征不足",
+            ],
+            strategy=strategy,
+        )
+        logger.info(
+            "风险快照：news gate 阻断（type=%s, confidence=%.2f, force=%s）",
+            detected_text_type,
+            news_confidence,
+            force,
+        )
+        _record_risk_trace(
+            "news_gate_blocked",
+            {
+                "detected_text_type": detected_text_type,
+                "news_confidence": news_confidence,
+                "news_reason": news_reason,
+                "result": asdict(blocked),
+            },
+        )
+        return blocked
+
+    result_path = "rule"
+    risk_result: ScoreResult | None = None
 
     if _risk_llm_enabled():
         logger.info("风险快照：LLM模式已启用，开始尝试LLM判定")
@@ -53,27 +118,50 @@ def detect_risk_snapshot(text: str) -> ScoreResult:
                 llm_result.label,
                 llm_result.score,
             )
-            _record_risk_trace(
-                "output",
-                {
-                    "path": "llm",
-                    "result": asdict(llm_result),
-                },
-            )
-            return llm_result
-        logger.warning("风险快照：LLM判定失败，已回退规则评分")
+            result_path = "llm"
+            risk_result = llm_result
+        else:
+            logger.warning("风险快照：LLM判定失败，已回退规则评分")
     else:
         logger.info("风险快照：LLM模式未启用，使用规则评分")
 
-    rule_result = score_text(text)
+    if risk_result is None:
+        label, confidence, score, reasons = score_text_risk_only(text)
+        risk_result = ScoreResult(
+            label=label,
+            score=score,
+            confidence=confidence,
+            reasons=reasons,
+            strategy=None,
+        )
+
+    strategy = build_strategy_from_complexity_and_risk(
+        score=risk_result.score,
+        label=risk_result.label,
+        complexity_level=complexity_level,
+        complexity_reason=complexity_reason,
+        max_claims=max_claims,
+        is_news=is_news,
+        news_confidence=news_confidence,
+        detected_text_type=detected_text_type,
+        news_reason=news_reason,
+    )
+    final_result = ScoreResult(
+        label=risk_result.label,
+        score=risk_result.score,
+        confidence=risk_result.confidence,
+        reasons=risk_result.reasons,
+        strategy=strategy,
+    )
+
     _record_risk_trace(
         "output",
         {
-            "path": "rule",
-            "result": asdict(rule_result),
+            "path": result_path,
+            "result": asdict(final_result),
         },
     )
-    return rule_result
+    return final_result
 
 
 def _risk_llm_enabled() -> bool:
@@ -199,13 +287,12 @@ def _normalize_llm_result(payload: dict[str, Any], text: str) -> ScoreResult | N
     if not reasons:
         reasons = ["模型未返回理由，建议人工复核。"]
 
-    strategy = infer_strategy(text, score, label)
     return ScoreResult(
         label=label,
         score=score,
         confidence=round(confidence, 2),
         reasons=reasons[:5],
-        strategy=strategy,
+        strategy=None,
     )
 
 

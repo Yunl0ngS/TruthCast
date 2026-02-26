@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { ProgressTimeline } from '@/components/layout';
 import { RiskOverview, ClaimList, EvidenceChain, ReportCard, ExportButton } from '@/components/features';
 import { ErrorBoundary } from '@/components/ui/error-boundary';
@@ -8,6 +9,7 @@ import type { Phase } from '@/types';
 import { CheckCircle2 } from 'lucide-react';
 
 export default function ResultPage() {
+  const [showFullInput, setShowFullInput] = useState(false);
   const {
     text,
     detectData,
@@ -23,6 +25,9 @@ export default function ResultPage() {
   } = usePipelineStore();
 
   const hasReport = report !== null;
+  const hasInputText = text.trim().length > 0;
+  const shouldClampInput = text.length > 800;
+  const inputPreview = showFullInput || !shouldClampInput ? text : `${text.slice(0, 800)}...`;
   const allDone =
     phases.detect === 'done' &&
     phases.claims === 'done' &&
@@ -45,20 +50,64 @@ export default function ResultPage() {
           mobileMode="collapsible"
           rememberExpandedKey="timeline_result"
         />
-        {hasReport && (
-          <ExportButton
-            data={{
-              inputText: text,
-              detectData,
-              claims,
-              evidences,
-              report,
-              simulation,
-              content: content ?? null,
-              exportedAt: new Date().toLocaleString('zh-CN'),
-            }}
-          />
-        )}
+        <div className="w-full space-y-3">
+          {hasReport && (
+            <div className="flex justify-center">
+              <ExportButton
+                data={{
+                  inputText: text,
+                  detectData,
+                  claims,
+                  evidences,
+                  report,
+                  simulation,
+                  content: content ?? null,
+                  exportedAt: new Date().toLocaleString('zh-CN'),
+                }}
+              />
+            </div>
+          )}
+
+          <div className="rounded-lg border bg-background p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h1 className="font-semibold text-foreground">输入新闻原文</h1>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="text-xs px-2 py-1 rounded border hover:bg-muted"
+                  onClick={async () => {
+                    if (!hasInputText) return;
+                    try {
+                      await navigator.clipboard.writeText(text);
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                  disabled={!hasInputText}
+                >
+                  复制原文
+                </button>
+                {shouldClampInput && (
+                  <button
+                    type="button"
+                    className="text-xs px-2 py-1 rounded border hover:bg-muted"
+                    onClick={() => setShowFullInput((prev) => !prev)}
+                  >
+                    {showFullInput ? '收起' : '展开'}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {hasInputText ? (
+              <div className="text-sm whitespace-pre-wrap break-words text-muted-foreground max-h-72 overflow-auto">
+                {inputPreview}
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">当前无可展示的输入新闻</div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* 分析完成庆祝 banner */}
