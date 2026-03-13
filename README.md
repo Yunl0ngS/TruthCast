@@ -111,7 +111,7 @@ cd TruthCast
 
 # 2. 配置环境变量
 cp .env.example .env
-# 编辑 .env 文件，填入你的 LLM API Key 和搜索引擎 API Key
+# 编辑 .env 文件，至少检查安全配置、LLM API Key 和搜索引擎 API Key
 
 # 3. 启动服务 (后台运行)
 docker-compose up -d
@@ -119,6 +119,13 @@ docker-compose up -d
 
 * 访问前端控制台: `http://localhost:3000`
 * 访问后端 API 文档: `http://localhost:8000/docs`
+
+部署前建议优先检查以下安全相关环境变量：
+
+- `TRUTHCAST_CORS_ORIGINS`：生产环境务必改成真实前端域名，多个域名用逗号分隔。
+- `TRUTHCAST_API_KEY`：留空则关闭 API 认证；生产环境建议设置，并让客户端携带 `Authorization: Bearer <key>` 或 `X-API-Key`。
+- `TRUTHCAST_RATE_LIMIT_RPM`：每个 IP 每分钟最大请求数，默认 `60`，设为 `0` 可关闭限流。
+- `TRUTHCAST_SSRF_BLOCK_PRIVATE`：默认 `true`，会阻止后端访问内网 / 私网 / 云元数据地址。
 
 > **注意**: 如果你将项目部署在远程服务器上，请在启动前设置 `NEXT_PUBLIC_API_BASE` 环境变量指向服务器的公网 IP 或域名，例如：
 > `NEXT_PUBLIC_API_BASE=http://your-server-ip:8000 docker-compose up -d --build`
@@ -145,13 +152,18 @@ pip install -e .[dev]
 
 # 4. 配置环境变量
 copy .env.example .env
-# 编辑 .env 文件，填入你的 LLM API Key 和搜索引擎 API Key
+# 编辑 .env 文件，至少检查安全配置、LLM API Key 和搜索引擎 API Key
 
 # 5. 启动服务
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 *后端服务将运行在 `http://localhost:8000`。*
+
+本地开发默认兼容旧流程，但有两点需要注意：
+
+- `TRUTHCAST_API_KEY` 默认可留空；留空时后端会自动关闭认证，方便本地联调。
+- `TRUTHCAST_CORS_ORIGINS` 默认允许 `http://localhost:3000` 和 `http://127.0.0.1:3000`，因此 README 里的前后端本地启动方式保持可用。
 
 #### 2. 前端控制台 (Frontend)
 
@@ -206,7 +218,11 @@ TRUTHCAST_CHAT_DB_PATH=data/chat/chat.db
 2. 设置根目录为 `/`。
 3. 构建命令: `pip install -e .`
 4. 启动命令: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-5. 在云平台的环境变量设置中，填入 `.env` 中的所有必需配置（如 `TRUTHCAST_LLM_API_KEY` 等）。
+5. 在云平台的环境变量设置中，填入 `.env` 中的所有必需配置（如 `TRUTHCAST_LLM_API_KEY`），并额外确认以下安全变量：
+   - `TRUTHCAST_CORS_ORIGINS` = 你的前端公网域名（多个域名用逗号分隔）
+   - `TRUTHCAST_API_KEY` = 生产环境建议设置
+   - `TRUTHCAST_RATE_LIMIT_RPM` = 按你的访问量调整，默认 `60`
+   - `TRUTHCAST_SSRF_BLOCK_PRIVATE` = 建议保持 `true`
 6. 部署成功后，获取后端的公网 URL（例如 `https://truthcast-api.onrender.com`）。
 
 #### 2. 部署前端 (Vercel / Netlify)
@@ -224,7 +240,30 @@ TRUTHCAST_CHAT_DB_PATH=data/chat/chat.db
 
 项目通过根目录的 `.env` 文件进行全局配置。系统支持高度定制化，你可以通过开关控制各个模块是使用 LLM 还是回退到规则引擎。
 
-### 1. 基础与 LLM 配置
+### 1. 安全配置（部署后建议首先检查）
+
+```ini
+# CORS 白名单（逗号分隔）
+TRUTHCAST_CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+
+# API Key 认证；留空则关闭认证
+TRUTHCAST_API_KEY=
+
+# 每分钟每 IP 最大请求数；0 = 不限流
+TRUTHCAST_RATE_LIMIT_RPM=60
+
+# SSRF 防护：阻止访问私有 / 内部 IP 和云元数据端点
+TRUTHCAST_SSRF_BLOCK_PRIVATE=true
+```
+
+说明：
+
+- 设置了 `TRUTHCAST_API_KEY` 后，除 `/health`、`/docs`、`/redoc`、`/openapi.json` 外，其余接口都需要认证。
+- 认证支持 `Authorization: Bearer <key>` 和 `X-API-Key: <key>` 两种方式。
+- 限流命中时后端会返回 `429` 并附带 `Retry-After`；未命中限流的正常响应会附带 `X-RateLimit-Limit`、`X-RateLimit-Remaining` 响应头。
+- SSRF 防护会影响用户输入 URL 的抓取类能力；如确需抓取内网地址，只建议在受信任的内网环境下临时关闭。
+
+### 2. 基础与 LLM 配置
 
 ```ini
 # 基础配置
@@ -237,7 +276,7 @@ TRUTHCAST_LLM_BASE_URL=https://api.openai.com/v1
 TRUTHCAST_LLM_MODEL=gpt-4o-mini
 ```
 
-### 2. 联网检索配置 (Web Retrieval)
+### 3. 联网检索配置 (Web Retrieval)
 
 系统支持多种搜索引擎，通过 `TRUTHCAST_WEB_SEARCH_PROVIDER` 切换：
 
@@ -286,7 +325,7 @@ TRUTHCAST_BAIDU_TIME_FILTER=1y       # 可选: 1d, 1w, 1m, 1y
 TRUTHCAST_BAIDU_SITE_FILTER=         # 限制搜索的站点，如 gov.cn
 ```
 
-### 3. 核心功能开关与独立模型配置
+### 4. 核心功能开关与独立模型配置
 
 每个核心模块都可以独立开启/关闭 LLM，并支持配置独立的模型（如果不配置，则回退使用全局 `TRUTHCAST_LLM_MODEL`）。
 
@@ -334,7 +373,7 @@ TRUTHCAST_CONTENT_LLM_MODEL=gpt-4o-mini
 TRUTHCAST_CONTENT_TIMEOUT_SEC=45
 ```
 
-### 4. 并发与性能配置
+### 5. 并发与性能配置
 
 ```ini
 # 报告生成阶段的并发控制
@@ -342,7 +381,7 @@ TRUTHCAST_CLAIM_PARALLEL_WORKERS=3      # 并行处理的主张数量
 TRUTHCAST_ALIGN_PARALLEL_WORKERS=4      # 单个主张内并行对齐的证据数量
 ```
 
-### 5. 调试与日志 (Debug Traces)
+### 6. 调试与日志 (Debug Traces)
 
 开启后，系统会在 `debug/` 目录下生成详细的 JSONL 追踪日志，记录 LLM 的完整 Prompt、响应和耗时，非常适合开发调试。
 
@@ -358,6 +397,8 @@ TRUTHCAST_DEBUG_SIMULATION=true
 ```
 
 ## 🔌 API 端点概览
+
+> 若已设置 `TRUTHCAST_API_KEY`，除 `/health`、`/docs`、`/redoc`、`/openapi.json` 外，其余接口均需携带 API Key。
 
 | 端点                          | 方法 | 描述                                          |
 | ----------------------------- | ---- | --------------------------------------------- |
