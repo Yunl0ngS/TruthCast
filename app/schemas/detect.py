@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -151,6 +153,7 @@ class ReportResponse(BaseModel):
     summary: str
     suspicious_points: list[str]
     claim_reports: list[ClaimReportItem]
+    multimodal: dict[str, Any] | None = None
 
 
 class SimulateRequest(BaseModel):

@@ -14,6 +14,7 @@ from app.api.routes_detect import router as detect_router
 from app.api.routes_export import router as export_router
 from app.api.routes_health import router as health_router
 from app.api.routes_history import router as history_router
+from app.api.routes_multimodal import router as multimodal_router
 from app.api.routes_simulate import router as simulate_router
 from app.api.routes_pipeline_state import router as pipeline_router
 from app.core.auth import require_api_key
@@ -69,3 +70,4 @@ app.include_router(pipeline_router)
 app.include_router(history_router)
 app.include_router(content_router)
 app.include_router(export_router)
+app.include_router(multimodal_router)

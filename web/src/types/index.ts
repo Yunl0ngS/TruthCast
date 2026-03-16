@@ -23,6 +23,62 @@ export type DetectResponse = {
   truncated?: boolean;
 };
 
+export type ImageInput = {
+  file_id?: string | null;
+  url?: string | null;
+  filename?: string | null;
+};
+
+export type StoredImage = {
+  file_id: string;
+  filename: string;
+  mime_type: string;
+  size: number;
+  public_url?: string | null;
+};
+
+export type OCRBlock = {
+  text: string;
+  confidence: number;
+  bbox?: number[] | null;
+};
+
+export type ImageOCRResult = {
+  file_id?: string | null;
+  source_url?: string | null;
+  ocr_text: string;
+  blocks: OCRBlock[];
+  confidence: number;
+  extraction_source: string;
+  status: string;
+  error_message?: string | null;
+};
+
+export type ImageAnalysisResult = {
+  file_id?: string | null;
+  source_url?: string | null;
+  image_summary: string;
+  relevance_score: number;
+  relevance_reason: string;
+  key_elements: string[];
+  matched_claims: string[];
+  semantic_conflicts: string[];
+  image_credibility_label: string;
+  image_credibility_score: number;
+  status: string;
+  error_message?: string | null;
+};
+
+export type MultimodalFusionReport = {
+  final_risk_score: number;
+  final_risk_label: string;
+  multimodal_consistency: string;
+  conflict_points: string[];
+  fusion_summary: string;
+  should_simulate: boolean;
+  image_evidence_status: string;
+};
+
 export type UrlDetectRequest = {
   url: string;
 };
@@ -86,6 +142,21 @@ export type ReportResponse = {
   summary: string;
   suspicious_points: string[];
   claim_reports: ClaimReport[];
+  multimodal?: Record<string, unknown> | null;
+};
+
+export type MultimodalDetectResponse = {
+  raw_text: string;
+  enhanced_text: string;
+  images: StoredImage[];
+  ocr_results: ImageOCRResult[];
+  image_analyses: ImageAnalysisResult[];
+  detect_data?: DetectResponse | null;
+  claims: ClaimItem[];
+  evidences: EvidenceItem[];
+  report?: ReportResponse | null;
+  fusion_report?: MultimodalFusionReport | null;
+  record_id?: string | null;
 };
 
 export type NarrativeItem = {

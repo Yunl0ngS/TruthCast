@@ -51,6 +51,7 @@ my_plans/
 .kilocode/
 .sisyphus/
 docs/superpowers/
+data/
 
 AGENTS.md
 GEMINI.md
