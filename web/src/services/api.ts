@@ -7,6 +7,7 @@ import type {
   ContentDraft,
   DetectResponse,
   EvidenceItem,
+  ImageAnalysisResult,
   ImageInput,
   MultimodalDetectResponse,
   Phase,
@@ -123,6 +124,19 @@ export async function detectMultimodalWithSignal(
   return data;
 }
 
+export async function analyzeMultimodalImagesWithSignal(
+  text: string | undefined,
+  images: ImageInput[],
+  signal?: AbortSignal
+): Promise<ImageAnalysisResult[]> {
+  const { data } = await api.post<{ image_analyses: ImageAnalysisResult[] }>(
+    '/multimodal/analyze-images',
+    { text, images },
+    { signal }
+  );
+  return data.image_analyses;
+}
+
 export async function detectUrl(url: string, signal?: AbortSignal): Promise<UrlDetectResponse> {
   const { data } = await api.post<UrlDetectResponse>('/detect/url', { url }, { signal });
   return data;
@@ -191,6 +205,7 @@ export interface DetectReportResult {
     final_stance: string;
     notes: string[];
   }>;
+  multimodal?: Record<string, unknown> | null;
 }
 
 export async function alignEvidence(
@@ -230,7 +245,8 @@ export async function detectReport(
   evidences?: EvidenceItem[],
   detectData?: DetectResponse | null,
   strategy?: StrategyConfig | null,
-  sourceMeta?: { source_url?: string | null; source_title?: string | null; source_publish_date?: string | null } | null
+  sourceMeta?: { source_url?: string | null; source_title?: string | null; source_publish_date?: string | null } | null,
+  multimodal?: Record<string, unknown> | null,
 ): Promise<DetectReportResult> {
   const { data } = await api.post<DetectReportResult>('/detect/report', {
     text,
@@ -241,6 +257,7 @@ export async function detectReport(
     source_url: sourceMeta?.source_url,
     source_title: sourceMeta?.source_title,
     source_publish_date: sourceMeta?.source_publish_date,
+    multimodal,
   });
   return data;
 }
@@ -252,7 +269,8 @@ export async function detectReportWithSignal(
   detectData?: DetectResponse | null,
   strategy?: StrategyConfig | null,
   sourceMeta?: { source_url?: string | null; source_title?: string | null; source_publish_date?: string | null } | null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  multimodal?: Record<string, unknown> | null,
 ): Promise<DetectReportResult> {
   const { data } = await api.post<DetectReportResult>(
     '/detect/report',
@@ -265,6 +283,7 @@ export async function detectReportWithSignal(
       source_url: sourceMeta?.source_url,
       source_title: sourceMeta?.source_title,
       source_publish_date: sourceMeta?.source_publish_date,
+      multimodal,
     },
     { signal }
   );

@@ -7,15 +7,17 @@ from pydantic import ValidationError
 from app.schemas.multimodal import (
     MultimodalDetectRequest,
     MultimodalDetectResponse,
+    MultimodalImageAnalysisRequest,
+    MultimodalImageAnalysisResponse,
     StoredImage,
 )
-from app.services.history_store import save_report
 from app.services.multimodal import (
     delete_stored_image,
     resolve_stored_image,
     run_multimodal_detect,
     store_upload,
 )
+from app.services.multimodal.orchestrator import analyze_multimodal_images
 
 router = APIRouter(prefix="/multimodal", tags=["multimodal"])
 
@@ -68,11 +70,17 @@ def detect_multimodal(payload: MultimodalDetectRequest) -> MultimodalDetectRespo
         raise HTTPException(status_code=404, detail=f"image not found: {exc}") from exc
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if result.report is not None:
-        record_id = save_report(
-            input_text=result.raw_text or result.enhanced_text,
-            report=result.report.model_dump(),
-            detect_data=result.detect_data.model_dump() if result.detect_data else None,
-        )
-        return result.model_copy(update={"record_id": record_id})
     return result
+
+
+@router.post("/analyze-images", response_model=MultimodalImageAnalysisResponse)
+def analyze_multimodal_image_branch(
+    payload: MultimodalImageAnalysisRequest,
+) -> MultimodalImageAnalysisResponse:
+    try:
+        results = analyze_multimodal_images(payload.text, payload.images)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"image not found: {exc}") from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return MultimodalImageAnalysisResponse(image_analyses=results)

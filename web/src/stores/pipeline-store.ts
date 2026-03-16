@@ -22,6 +22,7 @@ import type {
 import {
   alignEvidence,
   alignEvidenceWithSignal,
+  analyzeMultimodalImagesWithSignal,
   detect,
   detectMultimodalWithSignal,
   detectWithSignal,
@@ -575,9 +576,24 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
           payload: { reason, detected_text_type: currentStrategy.detected_text_type },
         });
         return;
-      }
-      
+        }
+
       try {
+        const imageBranchPromise = get().images.length > 0
+          ? analyzeMultimodalImagesWithSignal(analysisText, get().images as ImageInput[], signal)
+              .then((imageAnalyses) => {
+                set({ imageAnalyses });
+                return imageAnalyses;
+              })
+              .catch((err) => {
+                if (isAbortError(err)) {
+                  return [] as ImageAnalysisResult[];
+                }
+                console.warn('[multimodal] image analysis failed, continuing with text branch:', err);
+                toast.warning(`图片分析失败，已继续文本链路：${err instanceof Error ? err.message : '未知错误'}`);
+                return [] as ImageAnalysisResult[];
+              })
+          : Promise.resolve([] as ImageAnalysisResult[]);
         setPhase('claims', 'running');
         void _persistPhaseSnapshot(get, 'claims', 'running');
         if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
@@ -627,6 +643,16 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
           if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
           const currentDetectData = get().detectData;
           const currentSourceMeta = get().sourceMeta;
+          const currentImageAnalyses = await imageBranchPromise;
+          const currentMultimodalPayload = get().images.length > 0
+            ? {
+                raw_text: text,
+                enhanced_text: analysisText,
+                images: get().images,
+                ocr_results: get().ocrResults,
+                image_analyses: currentImageAnalyses,
+              }
+            : null;
         const reportResponse = await detectReportWithSignal(
           analysisText,
             claimsResult,
@@ -634,7 +660,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
             currentDetectData,
             currentStrategy,
             currentSourceMeta,
-            signal
+            signal,
+            currentMultimodalPayload,
           );
           recordId = reportResponse.record_id;
           reportResult = {
@@ -649,18 +676,16 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
             summary: reportResponse.summary,
             suspicious_points: reportResponse.suspicious_points,
             claim_reports: reportResponse.claim_reports,
-            multimodal: get().fusionReport
-              ? {
-                  preview_only: true,
-                  enhanced_text: get().enhancedText,
-                  images: get().images,
-                  ocr_results: get().ocrResults,
-                  image_analyses: get().imageAnalyses,
-                  fusion_report: get().fusionReport,
-                }
-              : null,
+            multimodal: reportResponse.multimodal ?? null,
           };
-          set({ report: reportResult, recordId });
+          set({
+            report: reportResult,
+            recordId,
+            imageAnalyses: Array.isArray((reportResponse.multimodal as any)?.image_analyses)
+              ? ((reportResponse.multimodal as any).image_analyses as ImageAnalysisResult[])
+              : currentImageAnalyses,
+            fusionReport: ((reportResponse.multimodal as any)?.fusion_report as MultimodalFusionReport | undefined) ?? null,
+          });
           setPhase('report', 'done');
           void _persistPhaseSnapshot(get, 'report', 'done');
           toast.success('综合报告生成完成');
@@ -913,6 +938,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
           const reportDetectData = get().detectData;
           const reportStrategy = get().strategy;
           const reportSourceMeta = get().sourceMeta;
+          const currentImageAnalyses = get().images.length > 0
+            ? await analyzeMultimodalImagesWithSignal(effectiveText, get().images as ImageInput[])
+            : [];
           const reportResponse = await detectReport(
             effectiveText,
             reportClaims,
@@ -920,6 +948,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
             reportDetectData,
             reportStrategy,
             reportSourceMeta,
+            get().images.length > 0
+              ? {
+                  raw_text: text,
+                  enhanced_text: effectiveText,
+                  images: get().images,
+                  ocr_results: get().ocrResults,
+                  image_analyses: currentImageAnalyses,
+                }
+              : null,
           );
           const newRecordId = reportResponse.record_id;
           const reportResult: ReportResponse = {
@@ -934,18 +971,16 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
             summary: reportResponse.summary,
             suspicious_points: reportResponse.suspicious_points,
             claim_reports: reportResponse.claim_reports,
-            multimodal: get().fusionReport
-              ? {
-                  preview_only: true,
-                  enhanced_text: get().enhancedText,
-                  images: get().images,
-                  ocr_results: get().ocrResults,
-                  image_analyses: get().imageAnalyses,
-                  fusion_report: get().fusionReport,
-                }
-              : null,
+            multimodal: reportResponse.multimodal ?? null,
           };
-          set({ report: reportResult, recordId: newRecordId });
+          set({
+            report: reportResult,
+            recordId: newRecordId,
+            imageAnalyses: Array.isArray((reportResponse.multimodal as any)?.image_analyses)
+              ? ((reportResponse.multimodal as any).image_analyses as ImageAnalysisResult[])
+              : currentImageAnalyses,
+            fusionReport: ((reportResponse.multimodal as any)?.fusion_report as MultimodalFusionReport | undefined) ?? null,
+          });
           setPhase('report', 'done');
           void _persistPhaseSnapshot(get, 'report', 'done');
           toast.success('综合报告重试成功');

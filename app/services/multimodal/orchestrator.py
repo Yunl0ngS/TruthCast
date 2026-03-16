@@ -20,7 +20,6 @@ def run_multimodal_detect(
     raw_text = (text or "").strip()
     stored_images = []
     ocr_results = []
-    image_analyses = []
 
     for image in images:
         if image.file_id:
@@ -29,7 +28,6 @@ def run_multimodal_detect(
             continue
         stored_images.append(stored)
         ocr_results.append(extract_image_text(stored))
-        image_analyses.append(analyze_image(stored, raw_text))
 
     ocr_texts = [
         item.accepted_text.strip() for item in ocr_results if item.accepted_text.strip()
@@ -41,7 +39,7 @@ def run_multimodal_detect(
     detect_result = detect_risk_snapshot(
         enhanced_text or raw_text or "图片新闻待分析",
         force=force,
-        enable_news_gate=False,
+        enable_news_gate=True,
     )
     detect_data = DetectResponse(
         label=detect_result.label,
@@ -52,32 +50,6 @@ def run_multimodal_detect(
         truncated=False,
     )
 
-    claims = orchestrator.run_claims(
-        enhanced_text or raw_text or "图片新闻待分析", strategy=detect_result.strategy
-    )
-    fusion_report = build_fusion_report(detect_data, image_analyses)
-    report = ReportResponse(
-        risk_score=fusion_report.final_risk_score,
-        risk_level=detect_result.strategy.risk_level
-        if detect_result.strategy
-        else "medium",
-        risk_label=fusion_report.final_risk_label,
-        detected_scenario="general",
-        evidence_domains=[],
-        summary=fusion_report.fusion_summary,
-        suspicious_points=fusion_report.conflict_points,
-        claim_reports=[],
-        multimodal={
-            "preview_only": True,
-            "raw_text": raw_text,
-            "enhanced_text": enhanced_text or raw_text,
-            "images": [item.model_dump() for item in stored_images],
-            "ocr_results": [item.model_dump() for item in ocr_results],
-            "image_analyses": [item.model_dump() for item in image_analyses],
-            "fusion_report": fusion_report.model_dump(),
-        },
-    )
-
     return MultimodalDetectResponse(
         raw_text=raw_text,
         enhanced_text=enhanced_text or raw_text,
@@ -85,11 +57,25 @@ def run_multimodal_detect(
             StoredImage.model_validate(item.model_dump()) for item in stored_images
         ],
         ocr_results=ocr_results,
-        image_analyses=image_analyses,
+        image_analyses=[],
         detect_data=detect_data,
-        claims=claims,
+        claims=[],
         evidences=[],
-        report=report,
-        fusion_report=fusion_report,
+        report=None,
+        fusion_report=None,
         record_id=None,
     )
+
+
+def analyze_multimodal_images(
+    text: str | None, images: list[ImageInput]
+) -> list[ImageAnalysisResult]:
+    raw_text = (text or "").strip()
+    image_analyses = []
+    for image in images:
+        if image.file_id:
+            stored = resolve_stored_image(image.file_id)
+        else:
+            continue
+        image_analyses.append(analyze_image(stored, raw_text))
+    return image_analyses

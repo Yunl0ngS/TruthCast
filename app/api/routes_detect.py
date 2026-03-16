@@ -22,6 +22,7 @@ from app.schemas.detect import (
     UrlDetectResponse,
 )
 from app.services.history_store import save_report
+from app.services.multimodal.fusion import build_report_multimodal_payload
 from app.services.pipeline import align_evidences
 from app.services.risk_snapshot import detect_risk_snapshot
 from app.services.news_crawler import crawl_news_url
@@ -141,6 +142,13 @@ def detect_report(payload: ReportRequest) -> dict:
             source_title=payload.source_title,
             source_publish_date=payload.source_publish_date,
         )
+    final_multimodal = build_report_multimodal_payload(
+        report=report,
+        detect_data=payload.detect_data,
+        multimodal=payload.multimodal,
+    )
+    if final_multimodal is not None:
+        report["multimodal"] = final_multimodal
     input_text = (
         text
         or " ".join((item.claim_text for item in (payload.claims or [])))

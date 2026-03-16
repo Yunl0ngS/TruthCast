@@ -125,6 +125,32 @@ def _call_provider(
     raise RuntimeError("ocr provider failed without explicit error")
 
 
+def _failed_result(image: StoredImageRecord, error_message: str) -> ImageOCRResult:
+    result = ImageOCRResult(
+        file_id=image.file_id,
+        source_url=image.public_url,
+        ocr_text="",
+        accepted_text="",
+        blocks=[],
+        confidence=0.0,
+        extraction_source="none",
+        status="failed",
+        error_message=error_message,
+    )
+    _record_ocr_trace(
+        "output",
+        {
+            "file_id": image.file_id,
+            "provider": "none",
+            "status": result.status,
+            "accepted_text": result.accepted_text,
+            "confidence": result.confidence,
+            "error_message": error_message,
+        },
+    )
+    return result
+
+
 def extract_image_text(image: StoredImageRecord) -> ImageOCRResult:
     settings = _settings()
     provider_map: dict[str, Callable[[StoredImageRecord], ImageOCRResult]] = {
@@ -189,7 +215,7 @@ def extract_image_text(image: StoredImageRecord) -> ImageOCRResult:
                 settings.retry_delay,
             )
             result = fallback_result
-    except Exception:
+    except Exception as primary_exc:
         if (
             settings.fallback_provider in provider_map
             and settings.fallback_provider != provider_name
@@ -203,14 +229,20 @@ def extract_image_text(image: StoredImageRecord) -> ImageOCRResult:
                     "reason": "provider_error",
                 },
             )
-            result = _call_provider(
-                provider_map[settings.fallback_provider],
-                image,
-                settings.max_retries,
-                settings.retry_delay,
-            )
+            try:
+                result = _call_provider(
+                    provider_map[settings.fallback_provider],
+                    image,
+                    settings.max_retries,
+                    settings.retry_delay,
+                )
+            except Exception as fallback_exc:
+                return _failed_result(
+                    image,
+                    f"primary={primary_exc}; fallback={fallback_exc}",
+                )
         else:
-            raise
+            return _failed_result(image, str(primary_exc))
     gated = _gate_text(result, settings.confidence_threshold)
     _record_ocr_trace(
         "output",

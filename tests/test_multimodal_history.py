@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.schemas.detect import ClaimItem, EvidenceItem
 from app.schemas.multimodal import ImageAnalysisResult, ImageOCRResult
 
 
@@ -43,7 +44,17 @@ def test_multimodal_history_detail_returns_fusion_and_image_metadata(
         "app.services.multimodal.orchestrator.extract_image_text", _fake_extract
     )
     monkeypatch.setattr(
-        "app.services.multimodal.orchestrator.analyze_image", _fake_analyze
+        "app.api.routes_multimodal.analyze_multimodal_images",
+        lambda text, images: [
+            _fake_analyze(
+                type(
+                    "Img",
+                    (),
+                    {"file_id": images[0].file_id, "public_url": "/multimodal/files/x"},
+                )(),
+                text,
+            )
+        ],
     )
     client = TestClient(app)
 
@@ -59,7 +70,51 @@ def test_multimodal_history_detail_returns_fusion_and_image_metadata(
         json={"text": "新闻原文", "images": [{"file_id": file_id}], "force": True},
     )
     assert detect.status_code == 200
-    body = detect.json()
+    detect_body = detect.json()
+
+    analysis = client.post(
+        "/multimodal/analyze-images",
+        json={"text": "新闻原文", "images": [{"file_id": file_id}]},
+    )
+    assert analysis.status_code == 200
+
+    report = client.post(
+        "/detect/report",
+        json={
+            "text": detect_body["enhanced_text"],
+            "claims": [
+                {
+                    "claim_id": "c1",
+                    "claim_text": "示例主张",
+                    "source_sentence": "示例主张",
+                }
+            ],
+            "evidences": [
+                {
+                    "evidence_id": "e1",
+                    "claim_id": "c1",
+                    "title": "证据标题",
+                    "source": "来源",
+                    "url": "https://example.com",
+                    "published_at": "2026-03-16",
+                    "summary": "证据摘要",
+                    "stance": "support",
+                    "source_weight": 0.8,
+                }
+            ],
+            "detect_data": detect_body["detect_data"],
+            "strategy": detect_body["detect_data"]["strategy"],
+            "multimodal": {
+                "raw_text": detect_body["raw_text"],
+                "enhanced_text": detect_body["enhanced_text"],
+                "images": detect_body["images"],
+                "ocr_results": detect_body["ocr_results"],
+                "image_analyses": analysis.json()["image_analyses"],
+            },
+        },
+    )
+    assert report.status_code == 200
+    body = report.json()
     assert body["record_id"]
 
     detail = client.get(f"/history/{body['record_id']}")
@@ -71,3 +126,4 @@ def test_multimodal_history_detail_returns_fusion_and_image_metadata(
     assert multimodal["raw_text"] == "新闻原文"
     assert multimodal["images"][0]["file_id"] == file_id
     assert multimodal["fusion_report"]["fusion_summary"]
+    assert multimodal["preview_only"] is False

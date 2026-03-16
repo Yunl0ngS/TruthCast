@@ -97,3 +97,18 @@ class MultimodalDetectResponse(BaseModel):
     report: ReportResponse | None = None
     fusion_report: MultimodalFusionReport | None = None
     record_id: str | None = None
+
+
+class MultimodalImageAnalysisRequest(BaseModel):
+    text: str | None = None
+    images: list[ImageInput] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_payload(self) -> "MultimodalImageAnalysisRequest":
+        if not self.images:
+            raise ValueError("multimodal image analysis requires images")
+        return self
+
+
+class MultimodalImageAnalysisResponse(BaseModel):
+    image_analyses: list[ImageAnalysisResult] = Field(default_factory=list)

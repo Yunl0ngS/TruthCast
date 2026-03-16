@@ -29,3 +29,40 @@ def build_fusion_report(
         should_simulate=False,
         image_evidence_status="available" if image_analyses else "unavailable",
     )
+
+
+def build_report_multimodal_payload(
+    report: dict,
+    detect_data: DetectResponse | None,
+    multimodal: dict | None,
+) -> dict | None:
+    if not multimodal:
+        return None
+
+    raw_text = str(multimodal.get("raw_text", "") or "")
+    enhanced_text = str(multimodal.get("enhanced_text", raw_text) or raw_text)
+    images = list(multimodal.get("images", []) or [])
+    ocr_results = list(multimodal.get("ocr_results", []) or [])
+    image_analyses = [
+        item
+        if isinstance(item, ImageAnalysisResult)
+        else ImageAnalysisResult.model_validate(item)
+        for item in (multimodal.get("image_analyses", []) or [])
+    ]
+
+    fusion = build_fusion_report(detect_data, image_analyses)
+    fusion = fusion.model_copy(
+        update={
+            "fusion_summary": f"{report.get('summary', '')} 已结合图片支路完成最终多模态融合。".strip(),
+            "should_simulate": True,
+        }
+    )
+    return {
+        "preview_only": False,
+        "raw_text": raw_text,
+        "enhanced_text": enhanced_text,
+        "images": images,
+        "ocr_results": ocr_results,
+        "image_analyses": [item.model_dump() for item in image_analyses],
+        "fusion_report": fusion.model_dump(),
+    }

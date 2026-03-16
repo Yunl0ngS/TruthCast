@@ -37,10 +37,12 @@ def test_extract_image_text_uses_vision_llm_provider_by_default(
         ocr_service, "_extract_with_vision_llm", fake_vision, raising=False
     )
 
-    with pytest.raises(RuntimeError, match="vision provider not wired"):
-        ocr_service.extract_image_text(_stored_image(tmp_path))
+    result = ocr_service.extract_image_text(_stored_image(tmp_path))
 
     assert called == ["img_123456abcdef"]
+    assert result.status == "failed"
+    assert result.ocr_text == ""
+    assert "vision provider not wired" in (result.error_message or "")
 
 
 def test_extract_image_text_falls_back_to_paddleocr_when_primary_fails(
@@ -134,3 +136,31 @@ def test_extract_image_text_writes_ocr_trace_when_debug_enabled(
     assert "provider_selected" in stages
     assert "gate_accept" in stages
     assert "output" in stages
+
+
+def test_extract_image_text_degrades_to_failed_result_when_all_providers_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TRUTHCAST_OCR_PROVIDER", "vision_llm")
+    monkeypatch.setenv("TRUTHCAST_OCR_FALLBACK_PROVIDER", "paddleocr")
+    monkeypatch.setenv("TRUTHCAST_OCR_MAX_RETRIES", "1")
+
+    def fake_vision(_: StoredImageRecord):
+        raise RuntimeError("vision unavailable")
+
+    def fake_paddle(_: StoredImageRecord):
+        raise RuntimeError("paddle unavailable")
+
+    monkeypatch.setattr(
+        ocr_service, "_extract_with_vision_llm", fake_vision, raising=False
+    )
+    monkeypatch.setattr(
+        ocr_service, "_extract_with_paddleocr", fake_paddle, raising=False
+    )
+
+    result = ocr_service.extract_image_text(_stored_image(tmp_path))
+
+    assert result.status == "failed"
+    assert result.ocr_text == ""
+    assert result.accepted_text == ""
+    assert "paddle unavailable" in (result.error_message or "")
