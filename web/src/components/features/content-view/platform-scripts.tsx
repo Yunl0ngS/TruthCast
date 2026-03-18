@@ -1,6 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import type { ReactNode } from 'react';
+import ReactMarkdown from 'react-markdown';
+import rehypeSanitize from 'rehype-sanitize';
+import remarkGfm from 'remark-gfm';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +27,62 @@ const PLATFORM_INFO: Record<Platform, { name: string; icon: string; color: strin
   bilibili: { name: 'B站', icon: '📺', color: 'bg-cyan-500/10 text-cyan-600 border-cyan-500/20' },
 };
 
+const markdownComponents = {
+  p: ({ children }: { children?: ReactNode }) => (
+    <p className="m-0 break-words">{children}</p>
+  ),
+  ul: ({ children }: { children?: ReactNode }) => (
+    <ul className="list-disc list-inside space-y-1 m-0 pl-5">{children}</ul>
+  ),
+  ol: ({ children }: { children?: ReactNode }) => (
+    <ol className="list-decimal list-inside space-y-1 m-0 pl-5">{children}</ol>
+  ),
+  li: ({ children }: { children?: ReactNode }) => (
+    <li className="leading-relaxed">{children}</li>
+  ),
+  code: ({ inline, children }: { inline?: boolean; children?: ReactNode }) =>
+    inline ? (
+      <code className="font-mono bg-muted/40 px-1 py-0.5 rounded">{children}</code>
+    ) : (
+      <code className="font-mono block bg-muted/40 px-3 py-2 rounded w-full overflow-x-auto whitespace-pre">
+        {children}
+      </code>
+    ),
+  a: ({ href, children }: { href?: string; children?: ReactNode }) => (
+    <a
+      className="text-blue-600 underline"
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+    >
+      {children}
+    </a>
+  ),
+};
+
+function MarkdownRenderer({ content }: { content?: string | null }) {
+  const normalized = content ?? '';
+  if (!normalized.trim()) {
+    return (
+      <div className="rounded-md bg-muted/50 p-4 text-sm text-muted-foreground">
+        暂无内容
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-md bg-muted/50 p-4 text-sm leading-relaxed text-foreground space-y-2">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeSanitize]}
+        components={markdownComponents}
+      >
+        {normalized}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
 export function PlatformScripts({ scripts, onCopy }: PlatformScriptsProps) {
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | null>(
     scripts[0]?.platform || null
@@ -33,9 +93,10 @@ export function PlatformScripts({ scripts, onCopy }: PlatformScriptsProps) {
 
   const handleCopy = () => {
     if (selectedScript) {
-      navigator.clipboard.writeText(selectedScript.content);
+      const textToCopy = selectedScript.content ?? '';
+      navigator.clipboard.writeText(textToCopy);
       setCopied(true);
-      onCopy?.(selectedScript.content);
+      onCopy?.(textToCopy);
       setTimeout(() => setCopied(false), 2000);
     }
   };
@@ -85,9 +146,7 @@ export function PlatformScripts({ scripts, onCopy }: PlatformScriptsProps) {
         {selectedScript && (
           <div className="space-y-3">
             {/* 内容 */}
-            <div className="rounded-md bg-muted/50 p-4 text-sm leading-relaxed whitespace-pre-wrap">
-              {selectedScript.content}
-            </div>
+            <MarkdownRenderer content={selectedScript.content} />
 
             {/* 话题标签 */}
             {selectedScript.hashtags && selectedScript.hashtags.length > 0 && (

@@ -12,6 +12,7 @@ import { useChatStore } from '@/stores/chat-store';
 import { usePipelineStore } from '@/stores/pipeline-store';
 import type { Phase } from '@/types';
 import { Maximize2, Minimize2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import {
   chatSessionStream,
   chatStream,
@@ -19,7 +20,10 @@ import {
   getChatSessionDetail,
   listChatSessions,
   getHistoryDetail,
+  type ChatStreamEvent,
 } from '@/services/api';
+
+const PHASE_ORDER: Phase[] = ['detect', 'claims', 'evidence', 'report', 'simulation', 'content'];
 
 function parseRetryPhase(text: string): Phase | null {
   const phase = text.trim().toLowerCase();
@@ -36,7 +40,7 @@ function parseLoadHistoryRecordId(input: string): string | null {
 }
 
 export function ChatWorkbench() {
-const {
+  const {
     session_id,
     setSessionId,
     messages,
@@ -154,6 +158,7 @@ const {
 
   // ====== 网页全屏（沉浸式工作区） ======
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
   const prevBodyOverflowRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isFullscreen) return;
@@ -181,7 +186,24 @@ const {
     };
   }, [isFullscreen]);
 
-  const PHASE_ORDER: Phase[] = ['detect', 'claims', 'evidence', 'report', 'simulation', 'content'];
+  useEffect(() => {
+    if (!isFullscreen) {
+      setPortalRoot(null);
+      return;
+    }
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    setPortalRoot(container);
+
+    return () => {
+      if (document.body.contains(container)) {
+        document.body.removeChild(container);
+      }
+      setPortalRoot(null);
+    };
+  }, [isFullscreen]);
+
   const activePhase = useMemo(() => {
     for (const p of PHASE_ORDER) {
       if (phases[p] === 'running') return p;
@@ -265,7 +287,6 @@ const {
         scrollRafRef.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session_id]);
 
   // 2) 新消息到达时：
@@ -286,7 +307,6 @@ const {
     if (!nearBottom) {
       setHasNewMessages(true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages]);
 
 // V2：优先创建后端会话（独立会话DB）。失败时不阻塞：仍可回退到旧 /chat/stream。
@@ -330,9 +350,7 @@ const {
       setLastEvent(`${last.phase} -> ${last.status}`);
     }
 
-    const emit = (phase: Phase, status: string) => {
-      // 只在阶段完成或失败时提示，避免 idle/running 噪音
-      if (status !== 'done' && status !== 'failed') return;
+    const emit = (phase: Phase, status: 'done' | 'failed') => {
       // 必须是从 running -> done/failed 的转换，避免恢复历史状态时误触发
       if (prev[phase] !== 'running') return;
 
@@ -380,7 +398,7 @@ const {
           updateMessage(id, {
             meta: {
               type: 'claims',
-              status: status as any,
+              status,
               taskId: taskId ?? null,
               createdAt: new Date().toISOString(),
               inputLength: text.length,
@@ -403,7 +421,7 @@ const {
           updateMessage(id, {
             meta: {
               type: 'evidence',
-              status: status as any,
+              status,
               taskId: taskId ?? null,
               createdAt: new Date().toISOString(),
               claims: Array.isArray(claims) ? claims : [],
@@ -429,7 +447,7 @@ const {
           updateMessage(id, {
             meta: {
               type: 'report',
-              status: status as any,
+              status,
               taskId: taskId ?? null,
               createdAt: new Date().toISOString(),
               recordId: recordId ?? null,
@@ -470,21 +488,24 @@ const {
       }
     };
 
-    (Object.keys(phases) as Phase[]).forEach((p) => emit(p, phases[p]));
+    (Object.keys(phases) as Phase[]).forEach((phase) => {
+      const status = phases[phase];
+      if (status === 'done' || status === 'failed') {
+        emit(phase, status);
+      }
+    });
     prevPhasesRef.current = phases;
   }, [
     addMessage,
     updateMessage,
     error,
-    claims.length,
-    detectData?.label,
-    detectData?.score,
-    rawEvidences.length,
-    evidences.length,
+    claims,
+    detectData,
+    rawEvidences,
+    evidences,
     phases,
     recordId,
-    report?.risk_label,
-    report?.risk_score,
+    report,
     taskId,
     text,
     setBoundRecordId,
@@ -538,7 +559,7 @@ const {
                 references: m.references,
                 meta: m.meta,
               }));
-              setMessages(mapped as any);
+              setMessages(mapped);
               addMessage('assistant', `已恢复会话：${detail.session.session_id}（${mapped.length} 条消息）`);
             })
             .catch((err) => {
@@ -582,7 +603,20 @@ const {
         },
       },
     ],
-    [addMessage, interruptPipeline, isPipelineRunning, retryFailed, runPipeline, setMessages, setSessionId, setBoundRecordId, text]
+    [
+      addMessage,
+      hydrateFromLatest,
+      interruptPipeline,
+      isPipelineRunning,
+      retryFailed,
+      runPipeline,
+      session_id,
+      setBoundRecordId,
+      setMessages,
+      setSessionId,
+      setTaskId,
+      text,
+    ]
   );
 
   const handleScroll = () => {
@@ -686,7 +720,7 @@ const {
       setStreaming(true);
       const assistantMsgId = addMessage('assistant', '');
 
-      const onEvent = (event: any) => {
+      const onEvent = (event: ChatStreamEvent) => {
         if (event?.data?.session_id) {
           setSessionId(event.data.session_id);
         }
@@ -759,7 +793,7 @@ const {
   };
 
   const ChatCard = (
-    <Card className="flex flex-col h-full min-h-0 py-4 gap-1 border-border/50 shadow-sm">
+    <Card className="flex h-full min-h-0 flex-col gap-1 overflow-hidden border-border/50 py-4 shadow-sm">
       <CardHeader className="pb-0 shrink-0 px-4">
         <CardTitle className="text-base">对话工作台</CardTitle>
       </CardHeader>
@@ -779,7 +813,7 @@ const {
         <div
           ref={scrollContainerRef}
           onScroll={handleScroll}
-          className="flex-1 min-h-0 overflow-y-auto pr-1 relative"
+          className="relative flex-1 min-h-0 overflow-y-auto pr-1"
         >
           <MessageList messages={messages} onCommand={runCommand} />
           {/* 底部哨兵：用于把视图滚动到最新 */}
@@ -813,7 +847,7 @@ const {
   );
 
   const ContextCard = (
-    <Card className="flex flex-col h-full min-h-0 py-4 gap-4 border-l-2 border-l-primary/30">
+    <Card className="flex h-full min-h-0 flex-col gap-3 border-l-2 border-l-primary/30 py-4">
       <CardHeader className="pb-2 shrink-0 px-4">
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-base">上下文</CardTitle>
@@ -838,19 +872,19 @@ const {
           </button>
         </div>
       </CardHeader>
-      <CardContent className="flex flex-col flex-1 min-h-0 gap-3 overflow-y-auto pr-1 px-4">
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-2.5 px-4">
         {boundRecordId && (
           <div className="text-xs text-muted-foreground bg-muted/50 rounded px-2 py-1">
             当前绑定: <span className="font-mono">{boundRecordId}</span>
           </div>
         )}
-        <div className="text-sm text-muted-foreground space-y-1">
-          <div>风险快照：{phases.detect}</div>
-          <div>主张抽取：{phases.claims}</div>
-          <div>证据处理：{phases.evidence}</div>
-          <div>综合报告：{phases.report}</div>
-          <div>舆情预演：{phases.simulation}</div>
-          <div>应对内容：{phases.content}</div>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <div className="whitespace-nowrap">风险快照：{phases.detect}</div>
+          <div className="whitespace-nowrap">主张抽取：{phases.claims}</div>
+          <div className="whitespace-nowrap">证据处理：{phases.evidence}</div>
+          <div className="whitespace-nowrap">综合报告：{phases.report}</div>
+          <div className="whitespace-nowrap">舆情预演：{phases.simulation}</div>
+          <div className="whitespace-nowrap">应对内容：{phases.content}</div>
         </div>
         <ContextPanel
           taskId={taskId}
@@ -871,12 +905,12 @@ const {
     </Card>
   );
 
-  return (
+  const layout = (
     <div
       className={
         isFullscreen
           ? 'fixed inset-0 z-50 bg-background p-2 md:p-4'
-          : 'h-full min-h-0'
+          : 'h-full min-h-0 overflow-hidden'
       }
     >
       {/* Mobile */}
@@ -900,11 +934,16 @@ const {
       </div>
 
       {/* Desktop */}
-      <div className="hidden lg:flex gap-3 h-full min-h-0">
-        <div className="flex-[2] min-h-0">{ChatCard}</div>
-        <div className="flex-[1] min-h-0">{ContextCard}</div>
+      <div className="hidden h-full min-h-0 gap-3 overflow-hidden lg:flex">
+        <div className="min-h-0 flex-[2] overflow-hidden">{ChatCard}</div>
+        <div className="min-h-0 flex-[1]">{ContextCard}</div>
       </div>
     </div>
   );
-}
 
+  if (isFullscreen && portalRoot) {
+    return createPortal(layout, portalRoot);
+  }
+
+  return layout;
+}

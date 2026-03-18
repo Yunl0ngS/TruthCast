@@ -16,6 +16,7 @@ interface EvidenceChainProps {
   claims: ClaimItem[];
   report: ReportResponse | null;
   isLoading: boolean;
+  selectedClaimId?: string | null;
 }
 
 type ViewMode = 'summary' | 'raw';
@@ -29,7 +30,14 @@ const stanceColors: Record<string, string> = {
   neutral: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
 };
 
-export function EvidenceChain({ evidences, rawEvidences, claims, report, isLoading }: EvidenceChainProps) {
+export function EvidenceChain({
+  evidences,
+  rawEvidences,
+  claims,
+  report,
+  isLoading,
+  selectedClaimId,
+}: EvidenceChainProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('summary');
 
   const claimTextMap = useMemo(() => {
@@ -93,7 +101,13 @@ export function EvidenceChain({ evidences, rawEvidences, claims, report, isLoadi
       items,
       mode: 'summary' as const,
     }));
-  }, [evidences, rawEvidences, claims, report, viewMode, claimTextMap]);
+  }, [evidences, rawEvidences, report, viewMode, claimTextMap]);
+
+  const visibleGroups = useMemo(() => {
+    if (!selectedClaimId) return groupedEvidences;
+    const matched = groupedEvidences.find((group) => group.claimId === selectedClaimId);
+    return matched ? [matched] : groupedEvidences;
+  }, [groupedEvidences, selectedClaimId]);
 
   if (isLoading) {
     return (
@@ -152,7 +166,8 @@ export function EvidenceChain({ evidences, rawEvidences, claims, report, isLoadi
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
-        {groupedEvidences.map((group) => (
+        {visibleGroups.map((group) => {
+          return (
           <div key={group.claimId} className="space-y-3">
             <div className="flex items-start gap-2">
               <Badge variant="secondary">{zhClaimId(group.claimId)}</Badge>
@@ -166,10 +181,12 @@ export function EvidenceChain({ evidences, rawEvidences, claims, report, isLoadi
               <p className="text-xs text-muted-foreground">该主张暂无聚合证据，已回退对齐后证据</p>
             )}
             {group.mode === 'raw' && (
-              <p className="text-xs text-muted-foreground">当前展示检索证据（标签为候选状态，不代表最终对齐结论）</p>
+              <p className="text-xs text-muted-foreground">
+                当前展示检索证据（标签为候选状态，不代表最终对齐结论）。证据列表支持内部滚动查看。
+              </p>
             )}
 
-            <div className="grid gap-3">
+            <div className="grid max-h-[40rem] gap-3 overflow-y-auto pr-1">
               {group.items.map((item) => (
                 <div
                   key={`${group.claimId}-${item.evidence_id}-${item.url}`}
@@ -249,7 +266,8 @@ export function EvidenceChain({ evidences, rawEvidences, claims, report, isLoadi
               ))}
             </div>
           </div>
-        ))}
+          );
+        })}
       </CardContent>
     </Card>
   );

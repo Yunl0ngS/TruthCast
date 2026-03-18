@@ -80,7 +80,7 @@ export function ReportCard({ report, isLoading }: ReportCardProps) {
   }
 
   return (
-    <Card className="transition-opacity duration-500 animate-in fade-in">
+    <Card className="border-white/70 bg-[linear-gradient(160deg,rgba(255,255,255,0.84),rgba(243,248,251,0.82))] transition-opacity duration-500 animate-in fade-in">
       <CardHeader>
         <CardTitle>综合报告</CardTitle>
         <CardDescription>完整的风险分析与建议</CardDescription>
@@ -95,15 +95,23 @@ export function ReportCard({ report, isLoading }: ReportCardProps) {
               {zhRiskLevel(report.risk_level)}风险
             </Badge>
           </div>
-          <span className="text-2xl font-bold">{report.risk_score}</span>
+          <div
+            data-panel="strong"
+            className="rounded-[1.25rem] px-4 py-3 shadow-[0_16px_32px_rgba(24,53,76,0.18)]"
+          >
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70">
+              综合风险分
+            </div>
+            <div className="mt-1 text-3xl font-semibold">{report.risk_score}</div>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-          <div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 text-sm">
+          <div className="rounded-[1.2rem] border border-white/65 bg-white/76 px-4 py-3 shadow-[0_10px_24px_rgba(26,54,78,0.05)]">
             <span className="text-muted-foreground">识别场景：</span>
             <span className="ml-2">{zhScenario(report.detected_scenario)}</span>
           </div>
-          <div>
+          <div className="rounded-[1.2rem] border border-white/65 bg-white/76 px-4 py-3 shadow-[0_10px_24px_rgba(26,54,78,0.05)]">
             <span className="text-muted-foreground">证据覆盖域：</span>
             <span className="ml-2">
               {report.evidence_domains.map((d) => zhDomain(d)).join('、') || '暂无'}
@@ -111,14 +119,19 @@ export function ReportCard({ report, isLoading }: ReportCardProps) {
           </div>
         </div>
 
-        <p className="text-sm">{zhText(report.summary)}</p>
+        <div className="rounded-[1.35rem] border border-white/70 bg-white/78 px-4 py-4 text-sm leading-7 shadow-[0_12px_28px_rgba(26,54,78,0.06)]">
+          {zhText(report.summary)}
+        </div>
 
         {report.suspicious_points.length > 0 && (
           <div>
             <h4 className="font-medium mb-2">可疑点</h4>
-            <ul className="space-y-1 text-sm">
+            <ul className="space-y-2 text-sm">
               {report.suspicious_points.map((point, index) => (
-                <li key={index} className="flex items-start gap-2">
+                <li
+                  key={index}
+                  className="flex items-start gap-2 rounded-[1.15rem] border border-white/60 bg-white/74 px-3 py-2.5 shadow-[0_8px_18px_rgba(26,54,78,0.04)]"
+                >
                   <span className="text-muted-foreground">•</span>
                   {zhText(point)}
                 </li>
@@ -135,7 +148,7 @@ export function ReportCard({ report, isLoading }: ReportCardProps) {
             {report.claim_reports.map((item) => (
               <div
                 key={item.claim.claim_id}
-                className="border rounded-lg p-3 hover:bg-muted/20 transition-colors"
+                className="rounded-[1.2rem] border border-white/65 bg-white/76 p-3 shadow-[0_10px_24px_rgba(26,54,78,0.05)] transition-colors hover:bg-white"
               >
                 <div className="flex items-start gap-2 mb-2">
                   <Badge variant="outline">{zhClaimId(item.claim.claim_id)}</Badge>

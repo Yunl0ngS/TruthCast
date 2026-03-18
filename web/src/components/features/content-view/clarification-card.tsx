@@ -23,12 +23,6 @@ const STYLE_LABELS: Record<ClarificationStyle, string> = {
   neutral: '中性客观',
 };
 
-const LENGTH_LABELS = {
-  short: { label: '短版', desc: '约100字' },
-  medium: { label: '中版', desc: '约300字' },
-  long: { label: '长版', desc: '约600字' },
-};
-
 export function ClarificationCard({ 
   clarification, 
   style = 'neutral',

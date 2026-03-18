@@ -66,7 +66,7 @@ export function ContextPanel({
   })();
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">快捷跳转</CardTitle>
@@ -91,7 +91,7 @@ export function ContextPanel({
         <CardHeader className="pb-2">
           <CardTitle className="text-base">当前上下文摘要</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm space-y-2">
+        <CardContent className="space-y-2 text-xs">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <span className="text-muted-foreground">任务ID：</span>
@@ -155,7 +155,7 @@ export function ContextPanel({
             <div className="text-muted-foreground mb-1">阶段状态：</div>
             <div className="flex flex-wrap gap-2">
               {(Object.keys(PHASE_LABEL) as Phase[]).map((p) => (
-                <Badge key={p} variant={phaseBadgeVariant(phases[p])}>
+                <Badge key={p} variant={phaseBadgeVariant(phases[p])} className="whitespace-nowrap text-[11px]">
                   {PHASE_LABEL[p]}：{phases[p]}
                 </Badge>
               ))}
@@ -166,4 +166,3 @@ export function ContextPanel({
     </div>
   );
 }
-

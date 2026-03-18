@@ -68,7 +68,7 @@ export function HistoryList() {
 
   if (error) {
     return (
-      <Card>
+      <Card className="border-white/70 bg-[linear-gradient(160deg,rgba(255,255,255,0.82),rgba(243,248,251,0.80))]">
         <CardContent className="py-8">
           <p className="text-destructive text-center">加载失败: {error.message}</p>
           <div className="flex justify-center mt-4">
@@ -136,8 +136,10 @@ export function HistoryList() {
               {items.map((item) => (
                 <div
                   key={item.id}
-                  className={`border rounded-lg p-3 cursor-pointer transition-colors ${
-                    selectedId === item.id ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'
+                  className={`cursor-pointer rounded-[1.2rem] border p-3 transition-colors ${
+                    selectedId === item.id
+                      ? 'border-primary/40 bg-primary/6 shadow-[0_12px_28px_rgba(24,53,76,0.10)]'
+                      : 'border-white/65 bg-white/78 hover:bg-white'
                   }`}
                   onClick={() => setSelectedId(item.id)}
                 >
@@ -171,7 +173,7 @@ export function HistoryList() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="border-white/70 bg-[linear-gradient(160deg,rgba(255,255,255,0.82),rgba(243,248,251,0.80))]">
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>记录详情</CardTitle>

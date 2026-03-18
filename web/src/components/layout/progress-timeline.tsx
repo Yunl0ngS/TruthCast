@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useSyncExternalStore, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
   CheckCircle2,
@@ -114,42 +114,55 @@ export function ProgressTimeline({
   const hasRunning = useMemo(() => phaseOrder.some((p) => phases[p] === 'running'), [phases]);
   const canAbortCurrent = !!onAbort && phases[currentPhase] === 'running';
   const [isAborting, setIsAborting] = useState(false);
+  const effectiveIsAborting = isAborting && hasRunning;
 
   useEffect(() => {
-    // 当不再有 running 阶段时，自动退出“正在中断”态
-    if (!hasRunning) setIsAborting(false);
-  }, [hasRunning]);
-
-  useEffect(() => {
-    if (!isAborting) return;
+    if (!effectiveIsAborting) return;
     // 超时回退：避免网络异常导致“中断中”一直锁死
     const t = window.setTimeout(() => setIsAborting(false), 8000);
     return () => window.clearTimeout(t);
-  }, [isAborting]);
+  }, [effectiveIsAborting]);
 
   const triggerAbort = () => {
     if (!onAbort) return;
     if (!canAbortCurrent) return;
-    if (isAborting) return;
+    if (effectiveIsAborting) return;
     setIsAborting(true);
     toast.info('正在中断…');
     onAbort();
   };
 
   const canCollapse = mobileMode === 'collapsible';
-  // 重要：不要在初次渲染读取 localStorage（会导致 SSR/CSR 初始 HTML 不一致触发 hydration mismatch）
-  const [expanded, setExpanded] = useState(mobileMode === 'expanded');
+  const persistedExpanded = useSyncExternalStore(
+    (onStoreChange) => {
+      if (!rememberExpandedKey || typeof window === 'undefined') {
+        return () => undefined;
+      }
 
-  useEffect(() => {
-    if (!rememberExpandedKey) return;
-    try {
-      const raw = localStorage.getItem(rememberExpandedKey);
-      if (raw === '1') setExpanded(true);
-      if (raw === '0') setExpanded(false);
-    } catch {
-      // ignore
-    }
-  }, [rememberExpandedKey]);
+      const handleStorage = (event: StorageEvent) => {
+        if (event.key === rememberExpandedKey) {
+          onStoreChange();
+        }
+      };
+
+      window.addEventListener('storage', handleStorage);
+      return () => window.removeEventListener('storage', handleStorage);
+    },
+    () => {
+      if (!rememberExpandedKey || typeof window === 'undefined') {
+        return null;
+      }
+      try {
+        return localStorage.getItem(rememberExpandedKey);
+      } catch {
+        return null;
+      }
+    },
+    () => null
+  );
+  const [expanded, setExpanded] = useState(
+    persistedExpanded === '1' ? true : persistedExpanded === '0' ? false : mobileMode === 'expanded'
+  );
 
   useEffect(() => {
     if (!rememberExpandedKey) return;
@@ -159,6 +172,14 @@ export function ProgressTimeline({
       // ignore
     }
   }, [expanded, rememberExpandedKey]);
+
+  useEffect(() => {
+    const nextExpanded =
+      persistedExpanded === '1' ? true : persistedExpanded === '0' ? false : mobileMode === 'expanded';
+    if (nextExpanded !== expanded) {
+      setTimeout(() => setExpanded(nextExpanded), 0);
+    }
+  }, [expanded, mobileMode, persistedExpanded]);
 
   const timelineId = rememberExpandedKey ? `timeline_${rememberExpandedKey}` : 'timeline_mobile';
 
@@ -174,7 +195,7 @@ export function ProgressTimeline({
               isCurrent={phase === currentPhase}
               canStart={canStartPhase(phases, phase)}
               canAbort={!!onAbort}
-              isAborting={isAborting}
+              isAborting={effectiveIsAborting}
               onAbort={triggerAbort}
               onRetry={onRetry}
               showRetry={showRetry}
@@ -218,14 +239,14 @@ export function ProgressTimeline({
                   role={canAbortCurrent ? 'button' : undefined}
                   tabIndex={canAbortCurrent ? 0 : -1}
                   aria-label={canAbortCurrent ? '中断分析' : undefined}
-                  aria-disabled={canAbortCurrent ? isAborting : undefined}
+                  aria-disabled={canAbortCurrent ? effectiveIsAborting : undefined}
                   title={canAbortCurrent ? '点击中断分析' : undefined}
                   className={cn(
                     'relative inline-flex items-center justify-center rounded-full w-7 h-7 border shrink-0 group',
                     'bg-blue-50 border-blue-200',
                     canAbortCurrent && 'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40',
-                    canAbortCurrent && !isAborting && 'hover:bg-blue-100/70',
-                    canAbortCurrent && isAborting && 'opacity-60 cursor-not-allowed'
+                    canAbortCurrent && !effectiveIsAborting && 'hover:bg-blue-100/70',
+                    canAbortCurrent && effectiveIsAborting && 'opacity-60 cursor-not-allowed'
                   )}
                   onClick={(e) => {
                     if (!canAbortCurrent) return;
@@ -246,7 +267,7 @@ export function ProgressTimeline({
                   <Square
                     className={cn(
                       'absolute h-3.5 w-3.5 text-red-600 transition-opacity',
-                      isAborting ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      effectiveIsAborting ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                     )}
                   />
                 </span>
@@ -310,7 +331,7 @@ export function ProgressTimeline({
                     isCurrent={phase === currentPhase}
                     canStart={canStartPhase(phases, phase)}
                     canAbort={!!onAbort}
-                    isAborting={isAborting}
+                    isAborting={effectiveIsAborting}
                     onAbort={triggerAbort}
                     onRetry={onRetry}
                     showRetry={showRetry}
@@ -382,7 +403,7 @@ function PhaseIndicator({
       )}
     >
       {icons[status]}
-      <span className="font-medium">{label}</span>
+      <span className="font-medium whitespace-nowrap">{label}</span>
 
       {canAbortHere && (
         <Button

@@ -56,6 +56,51 @@ type MetaBlock =
       total_claims: number;
     };
 
+type MessageMetaBase = {
+  type?: string;
+  blocks?: MetaBlock[];
+};
+
+type MessageMeta =
+  (
+    | PipelineProgressMeta
+    | DetectCardMeta
+    | ClaimsCardMeta
+    | EvidenceCardMeta
+    | ReportCardMeta
+    | SimulationStageCardMeta
+    | MessageMetaBase
+  ) & MessageMetaBase;
+
+function readMessageMeta(meta: ChatMessage['meta']): MessageMeta | null {
+  if (!meta || typeof meta !== 'object') return null;
+  return meta as MessageMeta & MessageMetaBase;
+}
+
+function isPipelineProgressMeta(meta: MessageMeta | null): meta is PipelineProgressMeta & MessageMetaBase {
+  return meta?.type === 'pipeline_progress';
+}
+
+function isDetectMeta(meta: MessageMeta | null): meta is DetectCardMeta & MessageMetaBase {
+  return meta?.type === 'detect';
+}
+
+function isClaimsMeta(meta: MessageMeta | null): meta is ClaimsCardMeta & MessageMetaBase {
+  return meta?.type === 'claims';
+}
+
+function isEvidenceMeta(meta: MessageMeta | null): meta is EvidenceCardMeta & MessageMetaBase {
+  return meta?.type === 'evidence';
+}
+
+function isReportMeta(meta: MessageMeta | null): meta is ReportCardMeta & MessageMetaBase {
+  return meta?.type === 'report';
+}
+
+function isSimulationStageMeta(meta: MessageMeta | null): meta is SimulationStageCardMeta & MessageMetaBase {
+  return meta?.type === 'simulation_stage';
+}
+
 function BlockCard({ block }: { block: MetaBlock }) {
   if (block.kind === 'section') {
     return (
@@ -168,16 +213,20 @@ export function MessageList({
 }) {
   return (
     <div className="space-y-3">
-      {messages.map((m) => (
-        <div
-          key={m.id}
-          className={cn(
-            'rounded-lg border px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap',
-            m.role === 'user' && 'bg-primary text-primary-foreground border-primary/30',
-            m.role === 'assistant' && 'bg-background',
-            m.role === 'system' && 'bg-muted'
-          )}
-        >
+      {messages.map((m) => {
+        const meta = readMessageMeta(m.meta);
+        const blocks = Array.isArray(meta?.blocks) ? meta.blocks : [];
+
+        return (
+          <div
+            key={m.id}
+            className={cn(
+              'rounded-lg border px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap',
+              m.role === 'user' && 'bg-primary text-primary-foreground border-primary/30',
+              m.role === 'assistant' && 'bg-background',
+              m.role === 'system' && 'bg-muted'
+            )}
+          >
           <div className="text-xs opacity-70 mb-1">
             {m.role === 'user' ? '你' : m.role === 'assistant' ? '助手' : '系统'} ·{' '}
             <span
@@ -198,45 +247,45 @@ export function MessageList({
           </div>
           <div>{m.content}</div>
 
-          {(m.meta as any)?.type === 'pipeline_progress' ? (
+          {isPipelineProgressMeta(meta) ? (
             <div className="mt-2">
-              <PipelineProgressCard meta={(m.meta as any) as PipelineProgressMeta} />
+              <PipelineProgressCard meta={meta} />
             </div>
           ) : null}
 
-          {(m.meta as any)?.type === 'detect' ? (
+          {isDetectMeta(meta) ? (
             <div className="mt-2">
-              <DetectResultCard meta={(m.meta as any) as DetectCardMeta} />
+              <DetectResultCard meta={meta} />
             </div>
           ) : null}
 
-          {(m.meta as any)?.type === 'claims' ? (
+          {isClaimsMeta(meta) ? (
             <div className="mt-2">
-              <ClaimsResultCard meta={(m.meta as any) as ClaimsCardMeta} />
+              <ClaimsResultCard meta={meta} />
             </div>
           ) : null}
 
-          {(m.meta as any)?.type === 'evidence' ? (
+          {isEvidenceMeta(meta) ? (
             <div className="mt-2">
-              <EvidenceResultCard meta={(m.meta as any) as EvidenceCardMeta} />
+              <EvidenceResultCard meta={meta} />
             </div>
           ) : null}
 
-          {(m.meta as any)?.type === 'report' ? (
+          {isReportMeta(meta) ? (
             <div className="mt-2">
-              <ReportResultCard meta={(m.meta as any) as ReportCardMeta} />
+              <ReportResultCard meta={meta} />
             </div>
           ) : null}
 
-          {(m.meta as any)?.type === 'simulation_stage' ? (
+          {isSimulationStageMeta(meta) ? (
             <div className="mt-2">
-              <SimulationStageResultCard meta={(m.meta as any) as SimulationStageCardMeta} />
+              <SimulationStageResultCard meta={meta} />
             </div>
           ) : null}
 
-          {Array.isArray((m.meta as any)?.blocks) && (m.meta as any).blocks.length > 0 && (
+          {blocks.length > 0 && (
             <div className="mt-2 space-y-2">
-              {((m.meta as any).blocks as MetaBlock[]).map((b, idx) => (
+              {blocks.map((b, idx) => (
                 <BlockCard key={`${b.kind}_${idx}`} block={b} />
               ))}
             </div>
@@ -283,8 +332,8 @@ export function MessageList({
             </div>
           )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
-

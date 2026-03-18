@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ProgressTimeline } from '@/components/layout/progress-timeline';
+import { PageHero, PageSection, ProgressTimeline } from '@/components/layout';
 import { 
   ClarificationCard, 
   FAQList, 
@@ -16,18 +16,16 @@ import { generateClarification, generateFAQ, generatePlatformScripts, updateHist
 import { usePipelineStore } from '@/stores/pipeline-store';
 import { 
   ClarificationStyle, 
-  ClarificationVariant,
   Platform,
   ContentGenerateRequest,
+  ContentDraft,
+  ClarificationContent,
+  ClarificationVariant,
+  PlatformScript,
+  FAQItem,
   Phase
 } from '@/types';
 import { toast } from 'sonner';
-
-const STYLE_LABEL: Record<ClarificationStyle, string> = {
-  formal: '正式严肃',
-  friendly: '亲切友好',
-  neutral: '中性客观',
-};
 
 function createVariantId(style: ClarificationStyle) {
   return `clar_${style}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -58,6 +56,10 @@ function formatDateTime(value?: string | null): string {
   return d.toLocaleString('zh-CN');
 }
 
+type ContentMergePayload = Partial<ContentDraft> & {
+  clarification_variant?: ClarificationVariant;
+};
+
 export default function ContentPage() {
   const router = useRouter();
   const {
@@ -74,7 +76,6 @@ export default function ContentPage() {
     retryPhase,
     interruptPipeline,
     recordId,
-    isFromHistory,
   } = usePipelineStore();
 
   const hasReport = report !== null;
@@ -119,7 +120,7 @@ export default function ContentPage() {
     faq_count: faqCount,
   });
 
-  const mergeContent = (partial: Record<string, unknown>) => {
+  const mergeContent = (partial: ContentMergePayload) => {
     const now = new Date().toISOString();
     const basedOn = {
       style,
@@ -131,16 +132,16 @@ export default function ContentPage() {
     };
 
     // 重要：不能用闭包里的 content（异步分阶段生成会导致 content 读取陈旧，从而覆盖前面已生成的模块）
-    const latest = (usePipelineStore.getState().content ?? {}) as any;
+    const latest: ContentDraft = usePipelineStore.getState().content ?? {};
 
     // 特殊合并：澄清稿版本增量追加（同风格多版本并存）
-    const incomingClarification = (partial as any)?.clarification as any | undefined;
-    const incomingClarificationVariant = (partial as any)?.clarification_variant as any | undefined;
-    const incomingPrimaryId = (partial as any)?.primary_clarification_id as string | undefined;
-    let mergedClarifications: any[] | undefined;
+    const incomingClarification = partial.clarification as ClarificationContent | undefined;
+    const incomingClarificationVariant = partial.clarification_variant;
+    const incomingPrimaryId = partial.primary_clarification_id;
+    let mergedClarifications: ClarificationVariant[] | undefined;
     let primaryClarificationId: string | undefined;
     if (incomingClarificationVariant || incomingClarification) {
-      const existing = (latest as any)?.clarifications ?? [];
+      const existing = latest.clarifications ?? [];
       mergedClarifications = Array.isArray(existing) ? [...existing] : [];
 
       if (incomingClarificationVariant) {
@@ -164,11 +165,11 @@ export default function ContentPage() {
     }
 
     // 特殊合并：平台话术按 platform 维度覆盖更新（保留未参与本次生成的平台话术）
-    const incomingScripts = (partial as any)?.platform_scripts as any[] | undefined;
-    const existingScripts = (latest as any)?.platform_scripts as any[] | undefined;
-    let mergedPlatformScripts: any[] | undefined;
+    const incomingScripts = partial.platform_scripts as PlatformScript[] | undefined;
+    const existingScripts = latest.platform_scripts;
+    let mergedPlatformScripts: PlatformScript[] | undefined;
     if (incomingScripts) {
-      const map = new Map<string, any>();
+      const map = new Map<string, PlatformScript>();
       for (const s of existingScripts ?? []) {
         if (s?.platform) map.set(String(s.platform), s);
       }
@@ -176,7 +177,7 @@ export default function ContentPage() {
         if (s?.platform) map.set(String(s.platform), s);
       }
       // 保持顺序：先按已有顺序输出，再补充新增平台
-      const ordered: any[] = [];
+      const ordered: PlatformScript[] = [];
       const seen = new Set<string>();
       for (const s of existingScripts ?? []) {
         const key = String(s?.platform ?? '');
@@ -195,12 +196,12 @@ export default function ContentPage() {
       mergedPlatformScripts = ordered;
     }
 
-    const next = {
+    const next: ContentDraft = {
       ...latest,
       ...partial,
-      generated_at: latest?.generated_at ?? now,
-      based_on: latest?.based_on ?? basedOn,
-    } as any;
+      generated_at: latest.generated_at ?? now,
+      based_on: latest.based_on ?? basedOn,
+    };
 
     // 写入澄清稿版本列表与主稿
     if (mergedClarifications) {
@@ -209,8 +210,8 @@ export default function ContentPage() {
     if (primaryClarificationId) {
       next.primary_clarification_id = primaryClarificationId;
       // 同时兼容旧字段：将主稿内容同步到 content.clarification
-      const primary = (next.clarifications ?? latest?.clarifications ?? []).find(
-        (v: any) => v.id === primaryClarificationId
+      const primary = (next.clarifications ?? latest.clarifications ?? []).find(
+        (v) => v.id === primaryClarificationId
       );
       if (primary?.content) {
         next.clarification = primary.content;
@@ -265,7 +266,7 @@ export default function ContentPage() {
         })
         .finally(() => setLoadingClarification(false));
 
-      let faqPromise: Promise<any>;
+      let faqPromise: Promise<FAQItem[] | null>;
       if (includeFaq) {
         setLoadingFaq(true);
         faqPromise = generateFAQ(request)
@@ -393,7 +394,12 @@ export default function ContentPage() {
   // 加载中骨架屏
   if (!inputText || !report) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 md:space-y-8">
+        <PageHero
+          eyebrow="Content Studio"
+          title="应对内容生成"
+          description="基于已完成的分析结果生成澄清稿、FAQ 和多平台话术。"
+        />
         <Skeleton className="h-12 w-full mb-6" />
         <Skeleton className="h-64 w-full" />
       </div>
@@ -401,38 +407,56 @@ export default function ContentPage() {
   }
 
   return (
-    <div className="space-y-6 px-2 md:px-4 py-4 md:py-6">
-      {/* 进度时间线 */}
-      <div className="flex flex-col items-center gap-4">
-        <ProgressTimeline
-          phases={phases}
-          onRetry={handleRetry}
-          onAbort={interruptPipeline}
-          showRetry={true}
-          mobileMode="collapsible"
-          rememberExpandedKey="timeline_content"
-        />
+    <div className="space-y-6 md:space-y-8">
+      <PageHero
+        eyebrow="Content Studio"
+        title="应对内容生成"
+        // description="这里把分析结果转成可发布、可解释、可分发的内容产物。页面定位是内容工作台，而不是简单的表单输出页。"
+        meta={
+          <>
+            <div className="rounded-full border border-[color:var(--border-strong)] bg-white/70 px-3 py-1.5 text-xs font-medium text-[color:var(--muted-strong)] shadow-[0_10px_24px_rgba(26,54,78,0.08)]">
+              澄清稿 / FAQ / 平台话术
+            </div>
+            {/* <div className="rounded-full border border-[color:var(--border-strong)] bg-white/70 px-3 py-1.5 text-xs font-medium text-[color:var(--muted-strong)] shadow-[0_10px_24px_rgba(26,54,78,0.08)]">
+              基于报告结果生成
+            </div> */}
+          </>
+        }
+        actions={
+          <>
+            <div className="w-full min-w-0 lg:mr-82 lg:w-[500px] xl:mr-84 xl:w-[520px]">
+              <ProgressTimeline
+                phases={phases}
+                onRetry={handleRetry}
+                onAbort={interruptPipeline}
+                showRetry={true}
+                mobileMode="collapsible"
+                rememberExpandedKey="timeline_content"
+              />
+            </div>
+            {hasReport && (
+              <ExportButton
+                data={{
+                  inputText: inputText,
+                  detectData,
+                  claims,
+                  evidences,
+                  report,
+                  simulation,
+                  content: content ?? null,
+                  exportedAt: new Date().toLocaleString('zh-CN'),
+                }}
+              />
+            )}
+          </>
+        }
+      />
 
-        {hasReport && (
-          <ExportButton
-            data={{
-              inputText: inputText,
-              detectData,
-              claims,
-              evidences,
-              report,
-              simulation,
-              content: content ?? null,
-              exportedAt: new Date().toLocaleString('zh-CN'),
-            }}
-          />
-        )}
-      </div>
-
-      <h1 className="text-xl md:text-2xl font-bold text-center text-primary mb-6">应对内容生成</h1>
-
-      {/* 生成控制面板 */}
-      <Card className="mb-6">
+      <PageSection
+        title="生成设置"
+        description="设置澄清稿风格、FAQ 条数和目标平台；这块是内容工作台的操作区。"
+      >
+      <Card className="mb-0 border-white/70 bg-[linear-gradient(160deg,rgba(255,255,255,0.82),rgba(243,248,251,0.80))]">
         <CardHeader className="pb-3 flex flex-row items-center justify-between gap-4">
           <CardTitle className="text-lg">生成设置</CardTitle>
           <Button
@@ -559,9 +583,15 @@ export default function ContentPage() {
           </div>
         </CardContent>
       </Card>
+      </PageSection>
 
       {/* 生成结果 */}
       {content && (
+        <PageSection
+          title="生成结果"
+          description="内容结果继续沿用现有生成逻辑，但整体容器和页面层级已经统一到新的工作台风格。"
+          muted
+        >
         <div className="space-y-6">
           {/* 澄清稿 */}
           {content.clarifications && content.clarifications.length > 0 && (
@@ -619,6 +649,7 @@ export default function ContentPage() {
             </div>
           )}
         </div>
+        </PageSection>
       )}
     </div>
   );

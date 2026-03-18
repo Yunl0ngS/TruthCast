@@ -4,16 +4,70 @@ import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
+import { PageHero, PageSection } from '@/components/layout';
 import { deleteMultimodalImage, resolveApiUrl, uploadMultimodalImage } from '@/services/api';
-import { usePipelineStore, useIsLoading } from '@/stores/pipeline-store';
+import { useIsLoading, usePipelineStore } from '@/stores/pipeline-store';
 import type { StoredImage } from '@/types';
-import { FileSearch, AlertCircle, Globe, FileText, ImagePlus, Loader2, UploadCloud, X } from 'lucide-react';
+import {
+  AlertCircle,
+  FileCheck2,
+  FileText,
+  Globe,
+  ImagePlus,
+  Layers3,
+  Loader2,
+  Radar,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  UploadCloud,
+  X,
+} from 'lucide-react';
+
+const capabilityCards = [
+  {
+    title: '风险快照',
+    description: '先给出初步风险等级和复杂度判断，决定后续核查深度。',
+    icon: Radar,
+  },
+  {
+    title: '证据链路',
+    description: '抽取主张、检索证据、做对齐与综合判断，不停留在单点打分。',
+    icon: FileCheck2,
+  },
+  {
+    title: '传播预演',
+    description: '预测舆情走势、引爆点和建议动作，便于提前响应。',
+    icon: Layers3,
+  },
+];
+
+const roleStories = [
+  {
+    title: '调研者 / Investigator',
+    description: '把新闻、链接、截图等输入整理为结构化事实，打通多模态线索。',
+    icon: Search,
+    accent: '收集事实',
+  },
+  {
+    title: '判断者 / Evaluator',
+    description: '串起风险、主张、证据和结论，让判断有据可查。',
+    icon: FileText,
+    accent: '串联证据',
+  },
+  {
+    title: '行动者 / Operator',
+    description: '生成传播预演与应对建议，推动决策方迅速行动。',
+    icon: ShieldCheck,
+    accent: '形成行动',
+  },
+];
 
 export default function HomePage() {
   const router = useRouter();
@@ -36,7 +90,7 @@ export default function HomePage() {
   const [isUploading, setIsUploading] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  
+
   useEffect(() => {
     try {
       setRestoreDisabled(sessionStorage.getItem('truthcast_restore_disabled') === '1');
@@ -131,248 +185,386 @@ export default function HomePage() {
       toast.warning('请输入有效的 URL（以 http:// 或 https:// 开头）');
       return;
     }
-    
+
     router.push('/result');
     crawlUrl(url).catch(() => {});
   };
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-6 md:py-10">
-      <Card>
-        <CardHeader className="text-center relative">
-          <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent rounded-t-xl" />
-          <div className="relative">
-            <div className="flex justify-center mb-4">
-              <div className="p-3 rounded-full bg-primary/10">
-                <FileSearch className="h-8 w-8 md:h-10 md:w-10 text-primary" />
+    <div className="space-y-6 md:space-y-8">
+      <PageHero
+        eyebrow="TruthCast / Response Cockpit"
+        title="TruthCast 事实核查与舆情推演系统"
+        // description="输入文本、链接或图片后，系统会依次给出风险快照、主张抽取、证据链、综合结论与舆情预演。首页既保留直接开工的效率，也提供清晰的产品价值说明。"
+        meta={
+          <>
+            <div className="rounded-full border border-[color:var(--border-strong)] bg-white/70 px-3 py-1.5 text-xs font-medium text-[color:var(--muted-strong)] shadow-[0_10px_24px_rgba(26,54,78,0.08)]">
+              五阶段闭环核查
+            </div>
+            <div className="rounded-full border border-[color:var(--border-strong)] bg-white/70 px-3 py-1.5 text-xs font-medium text-[color:var(--muted-strong)] shadow-[0_10px_24px_rgba(26,54,78,0.08)]">
+              证据驱动，不做绝对判定
+            </div>
+            <div className="rounded-full border border-[color:var(--border-strong)] bg-white/70 px-3 py-1.5 text-xs font-medium text-[color:var(--muted-strong)] shadow-[0_10px_24px_rgba(26,54,78,0.08)]">
+              支持多模态输入
+            </div>
+          </>
+        }
+        actions={
+          <>
+            <div className="rounded-[1.25rem] border border-white/60 bg-white/66 px-4 py-3 shadow-[0_14px_28px_rgba(26,54,78,0.08)]">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--muted-strong)]">
+                当前状态
+              </div>
+              <div className="mt-1 text-sm font-medium text-foreground">
+                {restorableTaskId ? '存在可恢复任务' : '准备开始新任务'}
               </div>
             </div>
-            <CardTitle className="text-xl md:text-2xl">TruthCast 智能研判台</CardTitle>
-            <CardDescription className="text-sm md:text-base mt-2">
-              输入新闻文本或网页链接，系统将分阶段返回风险快照、主张抽取、证据链与综合报告。
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <Tabs defaultValue="text" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 mb-4">
-              <TabsTrigger value="text" className="flex items-center gap-2">
-                <FileText className="h-4 w-4" />
-                文本分析
-              </TabsTrigger>
-              <TabsTrigger value="url" className="flex items-center gap-2">
-                <Globe className="h-4 w-4" />
-                链接核查
-              </TabsTrigger>
-            </TabsList>
-            
-            <TabsContent value="text" className="space-y-4">
-              <Textarea
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder="请输入待分析的文本，也可只上传图片进行多模态分析..."
-                rows={6}
-                className="resize-none text-base"
-              />
+            <Button size="lg" onClick={handleRun} disabled={isLoading || isUploading}>
+              {isLoading ? '分析中...' : '快速开始分析'}
+            </Button>
+          </>
+        }
+      />
 
-              <div
-                className={[
-                  'rounded-xl border border-dashed p-4 space-y-4 transition-colors',
-                  isDragActive
-                    ? 'border-primary bg-primary/5 shadow-sm'
-                    : 'border-border bg-muted/30 hover:bg-muted/40',
-                ].join(' ')}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <ImagePlus className="h-4 w-4 text-primary" />
-                      图片上传（多模态分析）
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      支持先上传图片，再与文本一起触发多模态检测；当前版本将图片 OCR 与语义摘要接入分析链路。
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {images.length > 0 && (
-                      <Button type="button" variant="ghost" size="sm" onClick={handleClearImages} disabled={isUploading || isLoading}>
-                        清空图片
-                      </Button>
-                    )}
-                    <label className="inline-flex">
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        className="hidden"
-                        onChange={handleUploadFiles}
-                        disabled={isUploading || isLoading}
-                      />
-                      <span className="inline-flex items-center justify-center rounded-md border bg-background px-3 py-2 text-sm font-medium shadow-xs cursor-pointer hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50">
-                        {isUploading ? (
-                          <span className="inline-flex items-center gap-2">
-                            <Loader2 className="h-4 w-4 animate-spin" /> 上传中...
-                          </span>
-                        ) : (
-                          '选择图片'
-                        )}
-                      </span>
-                    </label>
-                  </div>
+      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+        <Card className="overflow-hidden border-white/70 bg-[linear-gradient(160deg,rgba(255,255,255,0.84),rgba(244,249,252,0.82))]">
+          <CardHeader className="border-b border-border/60 pb-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-2 rounded-full border border-[color:var(--border-strong)] bg-white/72 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--muted-strong)]">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  任务入口
                 </div>
+                <CardTitle className="text-2xl md:text-[2rem]">开始一次研判任务</CardTitle>
+                <CardDescription>
+                  支持文本核查、链接抓取与图片多模态分析。这里保持原有工作流，但会把最重要的输入入口放在同一张一级卡中。
+                </CardDescription>
+              </div>
+              <div className="rounded-[1.25rem] border border-white/70 bg-[color:var(--panel-strong)] px-4 py-3 text-[color:var(--panel-strong-foreground)] shadow-[0_18px_36px_rgba(24,53,76,0.22)]">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/72">
+                  输入模式
+                </div>
+                <div className="mt-1 text-sm font-medium">文本 / 链接 / 图片</div>
+              </div>
+            </div>
+          </CardHeader>
 
-                <button
-                  type="button"
+          <CardContent className="space-y-6 pt-6">
+            <Tabs defaultValue="text" className="w-full">
+              <TabsList className="grid w-full grid-cols-2 rounded-2xl border border-white/60 bg-white/65 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]">
+                <TabsTrigger value="text" className="flex items-center gap-2 rounded-xl">
+                  <FileText className="h-4 w-4" />
+                  文本分析
+                </TabsTrigger>
+                <TabsTrigger value="url" className="flex items-center gap-2 rounded-xl">
+                  <Globe className="h-4 w-4" />
+                  链接核查
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="text" className="space-y-5 pt-5">
+                <Textarea
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder="请输入待分析的新闻文本，也可以只上传图片进行多模态分析。"
+                  rows={8}
+                  className="resize-none rounded-[1.35rem] border-white/60 bg-white/74 px-4 py-3 text-base shadow-[0_10px_24px_rgba(26,54,78,0.06)]"
+                />
+
+                <div
                   className={[
-                    'group w-full rounded-xl border border-dashed px-4 py-6 text-left transition-colors',
+                    'space-y-4 rounded-[1.5rem] border border-dashed p-4 transition-colors md:p-5',
                     isDragActive
-                      ? 'border-primary bg-primary/10'
-                      : 'border-border/80 bg-background/80 hover:border-primary/60 hover:bg-background',
+                      ? 'border-primary bg-primary/8 shadow-[0_14px_30px_rgba(24,53,76,0.08)]'
+                      : 'border-border/80 bg-[color:var(--panel-soft)]/72 hover:bg-[color:var(--panel-soft)]/90',
                   ].join(' ')}
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploading || isLoading}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
                 >
-                  <div className="flex flex-col items-center justify-center gap-3 text-center">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-full border bg-background shadow-sm">
-                      {isUploading ? <Loader2 className="h-5 w-5 animate-spin text-primary" /> : <UploadCloud className="h-5 w-5 text-primary" />}
-                    </div>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="space-y-1">
-                      <div className="text-sm font-medium text-foreground">
-                        {isDragActive ? '松开鼠标即可上传图片' : '点击选择图片，或将图片拖拽到此处'}
+                      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                        <ImagePlus className="h-4 w-4 text-primary" />
+                        图片上传（多模态分析）
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        支持多张图片；上传后会自动接入 OCR 与多模态分析链路。
-                      </div>
+                      <p className="text-xs leading-6 text-muted-foreground">
+                        上传后会自动进入 OCR 与语义分析链路。适合截图、海报、聊天记录等含图内容的快速核查。
+                      </p>
                     </div>
-                  </div>
-                </button>
-
-                {images.length > 0 ? (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {images.map((image) => (
-                      <div
-                        key={image.file_id}
-                        className="flex items-center gap-3 rounded-lg border bg-background px-3 py-3"
-                      >
-                        <div className="h-16 w-16 shrink-0 overflow-hidden rounded-md border bg-muted/30">
-                          {resolveApiUrl(image.public_url) ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={resolveApiUrl(image.public_url) ?? ''}
-                              alt={image.filename}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
-                              无预览
-                            </div>
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-foreground">{image.filename}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {image.mime_type} · {(image.size / 1024).toFixed(1)} KB
-                          </p>
-                          <p className="truncate text-[11px] text-muted-foreground/80">{image.file_id}</p>
-                        </div>
+                    <div className="flex items-center gap-2">
+                      {images.length > 0 ? (
                         <Button
                           type="button"
                           variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0"
-                          onClick={() => void handleRemoveImage(image.file_id)}
+                          size="sm"
+                          onClick={handleClearImages}
                           disabled={isUploading || isLoading}
                         >
-                          <X className="h-4 w-4" />
+                          清空图片
                         </Button>
+                      ) : null}
+                      <label className="inline-flex">
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          className="hidden"
+                          onChange={handleUploadFiles}
+                          disabled={isUploading || isLoading}
+                        />
+                        <span className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-white/60 bg-white px-3 py-2 text-sm font-medium shadow-[0_10px_24px_rgba(26,54,78,0.08)] transition-colors hover:bg-accent hover:text-accent-foreground">
+                          {isUploading ? (
+                            <span className="inline-flex items-center gap-2">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              上传中...
+                            </span>
+                          ) : (
+                            '选择图片'
+                          )}
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    className={[
+                      'group w-full rounded-[1.35rem] border border-dashed px-4 py-7 text-left transition-all md:px-5',
+                      isDragActive
+                        ? 'border-primary bg-primary/10'
+                        : 'border-border/80 bg-white/72 hover:border-primary/50 hover:bg-white',
+                    ].join(' ')}
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading || isLoading}
+                  >
+                    <div className="flex flex-col items-center justify-center gap-3 text-center">
+                      <div className="flex h-14 w-14 items-center justify-center rounded-full border border-white/70 bg-white shadow-[0_12px_28px_rgba(26,54,78,0.10)]">
+                        {isUploading ? (
+                          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                        ) : (
+                          <UploadCloud className="h-5 w-5 text-primary" />
+                        )}
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-xs text-muted-foreground">
-                    尚未上传图片。可直接文本分析，也可上传 1~N 张图片触发多模态 detect。
-                  </div>
-                )}
-              </div>
+                      <div className="space-y-1">
+                        <div className="text-sm font-medium text-foreground">
+                          {isDragActive ? '松开鼠标即可上传图片' : '点击选择图片，或将图片拖拽到此处'}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          支持多张图片；上传后会自动接入多模态 detect 链路。
+                        </div>
+                      </div>
+                    </div>
+                  </button>
 
-              <div className="flex justify-center">
+                  {images.length > 0 ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {images.map((image) => (
+                        <div
+                          key={image.file_id}
+                          className="flex items-center gap-3 rounded-[1.15rem] border border-white/70 bg-white/78 px-3 py-3 shadow-[0_10px_24px_rgba(26,54,78,0.06)]"
+                        >
+                          <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl border bg-muted/30">
+                            {resolveApiUrl(image.public_url) ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={resolveApiUrl(image.public_url) ?? ''}
+                                alt={image.filename}
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
+                                无预览
+                              </div>
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-foreground">{image.filename}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {image.mime_type} · {(image.size / 1024).toFixed(1)} KB
+                            </p>
+                            <p className="truncate text-[11px] text-muted-foreground/80">{image.file_id}</p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-9 w-9 shrink-0"
+                            onClick={() => void handleRemoveImage(image.file_id)}
+                            disabled={isUploading || isLoading}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground">
+                      尚未上传图片。你可以直接进行文本分析，也可以补充多张图片一起进入多模态核查。
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-sm text-muted-foreground">
+                    文本、图片可组合输入；没有文本时，也支持纯图片启动分析。
+                  </div>
+                  <Button
+                    size="lg"
+                    onClick={handleRun}
+                    disabled={isLoading || isUploading || (!text.trim() && images.length === 0)}
+                    className="sm:min-w-52"
+                  >
+                    {isLoading ? '分析中...' : '开始分析'}
+                  </Button>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="url" className="space-y-5 pt-5">
+                <div className="space-y-3 rounded-[1.35rem] border border-white/70 bg-white/76 p-4 shadow-[0_10px_24px_rgba(26,54,78,0.06)]">
+                  <Input
+                    type="url"
+                    placeholder="请输入新闻或网页链接（http://...）"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    className="h-12 rounded-xl border-white/60 bg-white text-base"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleCrawl();
+                    }}
+                  />
+                  <p className="text-xs leading-6 text-muted-foreground">
+                    系统会自动抓取网页正文、标题、发布日期等关键信息，再进入分析流水线。
+                  </p>
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-sm text-muted-foreground">
+                    适合核查新闻链接、公众号文章或其他已发布页面。
+                  </div>
+                  <Button
+                    size="lg"
+                    onClick={handleCrawl}
+                    disabled={isLoading || !url.trim()}
+                    className="sm:min-w-52"
+                  >
+                    {isLoading ? '抓取中...' : '抓取并核查'}
+                  </Button>
+                </div>
+              </TabsContent>
+            </Tabs>
+
+            {error ? (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            ) : null}
+
+            {restorableTaskId && restoreDisabled ? (
+              <div className="flex flex-col items-start gap-3 rounded-[1.25rem] border border-white/60 bg-white/72 px-4 py-3 text-sm text-muted-foreground shadow-[0_10px_24px_rgba(26,54,78,0.06)]">
+                <div>
+                  已关闭自动恢复提示（本次会话内生效）。
+                  {restorableUpdatedAt ? ` 可恢复任务更新时间：${restorableUpdatedAt}` : ''}
+                </div>
                 <Button
-                  size="lg"
-                  onClick={handleRun}
-                  disabled={isLoading || isUploading || (!text.trim() && images.length === 0)}
-                  className="w-full sm:w-auto sm:min-w-48 bg-primary hover:bg-primary/90"
-                >
-                  {isLoading ? '分析中...' : '开始分析'}
-                </Button>
-              </div>
-            </TabsContent>
-            
-            <TabsContent value="url" className="space-y-4">
-              <div className="space-y-2">
-                <Input
-                  type="url"
-                  placeholder="请输入新闻或网页链接 (http://...)"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  className="text-base h-12"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleCrawl();
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    try {
+                      sessionStorage.removeItem('truthcast_restore_disabled');
+                    } catch {
+                      // ignore
+                    }
+                    setRestoreDisabled(false);
+                    void hydrateFromLatest({ taskId: restorableTaskId, force: true });
                   }}
-                />
-                <p className="text-xs text-muted-foreground">
-                  系统将自动抓取网页正文、发布日期等关键信息并进入分析流水线。
-                </p>
-              </div>
-              <div className="flex justify-center">
-                <Button
-                  size="lg"
-                  onClick={handleCrawl}
-                  disabled={isLoading || !url.trim()}
-                  className="w-full sm:w-auto sm:min-w-48"
-                  variant="default"
                 >
-                  {isLoading ? '抓取中...' : '抓取并核查'}
+                  恢复上一次分析
                 </Button>
               </div>
-            </TabsContent>
-          </Tabs>
-          
-          {error && (
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
+            ) : null}
+          </CardContent>
+        </Card>
 
-          {restorableTaskId && restoreDisabled && (
-            <div className="pt-2 flex flex-col items-center gap-2 text-sm text-muted-foreground">
-              <div>
-                已关闭自动恢复提示（本次会话内生效）。
-                {restorableUpdatedAt ? ` 可恢复任务更新时间：${restorableUpdatedAt}` : ''}
+        <div className="space-y-6">
+          <PageSection
+            title="这次重构后的首页角色"
+            description="首页既是输入入口，也是角色联动的起点——输入→判断→行动三位角色共同驱动 TruthCast 的闭环。"
+          >
+            <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+              <div className="rounded-[1.5rem] bg-[linear-gradient(160deg,rgba(255,255,255,0.95),rgba(244,249,252,0.92))] p-6 shadow-[0_18px_36px_rgba(24,53,76,0.18)]">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--muted-strong)]">
+                  首页新角色
+                </div>
+                <div className="mt-2 text-xl font-semibold text-foreground">
+                  一个输入驱动的团队故事
+                </div>
+                {/* <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                  TruthCast 的首页不再是冷冰冰的表单，而是化身为“调研者 → 判断者 → 行动者”三位角色，围绕同一个任务：从输入出发，把风险、证据与行动建议串联起来。
+                </p> */}
+                <div className="mt-4 space-y-2 text-sm text-foreground/90">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    <span className="font-medium text-foreground">输入驱动，结论面向决策</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Layers3 className="h-4 w-4 text-primary" />
+                    <span className="font-medium text-foreground">多模态信息统一接入</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Radar className="h-4 w-4 text-primary" />
+                    <span className="font-medium text-foreground">行动建议可追溯、可导出</span>
+                  </div>
+                </div>
               </div>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => {
-                  try {
-                    sessionStorage.removeItem('truthcast_restore_disabled');
-                  } catch {
-                    // ignore
-                  }
-                  setRestoreDisabled(false);
-                  void hydrateFromLatest({ taskId: restorableTaskId, force: true });
-                }}
-              >
-                恢复上一次分析
-              </Button>
+              <div className="grid gap-4">
+                {roleStories.map((role) => (
+                  <div
+                    key={role.title}
+                    className="rounded-[1.35rem] border border-white/65 bg-white/76 p-5 shadow-[0_10px_24px_rgba(26,54,78,0.08)]"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-[13px] font-semibold uppercase tracking-[0.16em] text-[color:var(--muted-strong)]">
+                        <role.icon className="h-4 w-4 text-primary" />
+                        {role.accent}
+                      </div>
+                      <div className="text-xs text-muted-foreground">首页角色</div>
+                    </div>
+                    <div className="mt-3 text-base font-medium text-foreground">{role.title}</div>
+                    <p className="mt-2 text-sm leading-6 text-muted-foreground">{role.description}</p>
+                  </div>
+                ))}
+              </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </PageSection>
+
+          <PageSection
+            title="核心能力"
+            // description="沿用现有后端闭环能力，但在首页先用更容易理解的方式说明出来。"
+            muted
+          >
+            <div className="grid gap-3">
+              {capabilityCards.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <div
+                    key={item.title}
+                    className="flex items-start gap-3 rounded-[1.35rem] border border-white/60 bg-white/74 p-4 shadow-[0_10px_24px_rgba(26,54,78,0.06)]"
+                  >
+                    <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                      <Icon className="h-5 w-5" />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-sm font-medium text-foreground">{item.title}</div>
+                      <p className="text-sm leading-6 text-muted-foreground">{item.description}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </PageSection>
+        </div>
+      </div>
     </div>
   );
 }

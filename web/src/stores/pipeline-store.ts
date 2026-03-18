@@ -138,6 +138,37 @@ const initialState = {
 
 const DEFAULT_TEXT = initialState.text;
 
+type SnapshotPayload = {
+  enhancedText?: string | null;
+  detectData?: DetectResponse | null;
+  strategy?: StrategyConfig | null;
+  sourceMeta?: PipelineState['sourceMeta'];
+  images?: StoredImage[];
+  ocrResults?: ImageOCRResult[];
+  claims?: ClaimItem[];
+  rawEvidences?: EvidenceItem[];
+  evidences?: EvidenceItem[];
+  report?: ReportResponse | null;
+  recordId?: string | null;
+  imageAnalyses?: ImageAnalysisResult[];
+  fusionReport?: MultimodalFusionReport | null;
+  simulation?: SimulateResponse | null;
+  content?: ContentDraft | null;
+};
+
+type SnapshotMeta = {
+  recordId?: string | null;
+  record_id?: string | null;
+};
+
+type MultimodalMeta = {
+  enhanced_text?: string | null;
+  images?: StoredImage[];
+  ocr_results?: ImageOCRResult[];
+  image_analyses?: ImageAnalysisResult[];
+  fusion_report?: MultimodalFusionReport | null;
+};
+
 function isMultimodalDetectResponse(
   result: DetectResponse | MultimodalDetectResponse
 ): result is MultimodalDetectResponse {
@@ -378,13 +409,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       };
 
       // meta 中可能包含 recordId（例如 chat 会话写入的 snapshot meta）
-      const metaRecordId = (latest.meta as any)?.recordId ?? (latest.meta as any)?.record_id;
+      const meta = (latest.meta ?? null) as SnapshotMeta | null;
+      const metaRecordId = meta?.recordId ?? meta?.record_id;
       if (typeof metaRecordId === 'string' && metaRecordId) {
         next.recordId = metaRecordId;
       }
 
       for (const snap of latest.snapshots ?? []) {
-        const payload = (snap.payload ?? {}) as any;
+        const payload = (snap.payload ?? {}) as SnapshotPayload;
         switch (snap.phase) {
           case 'detect':
             if (typeof payload.enhancedText === 'string') next.enhancedText = payload.enhancedText;
@@ -417,7 +449,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
         }
       }
 
-      set(next as any);
+      set(next as Partial<PipelineState>);
       if (!opts?.silent) {
         toast.success('已从数据库恢复上一次分析进度');
       }
@@ -506,7 +538,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
     };
 
     const isAbortError = (err: unknown) => {
-      const e = err as any;
+      const e = err as { name?: string; code?: string; message?: string } | null;
       return (
         e?.name === 'AbortError' ||
         e?.code === 'ERR_CANCELED' ||
@@ -678,13 +710,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
             claim_reports: reportResponse.claim_reports,
             multimodal: reportResponse.multimodal ?? null,
           };
+          const multimodal = (reportResponse.multimodal ?? null) as MultimodalMeta | null;
           set({
             report: reportResult,
             recordId,
-            imageAnalyses: Array.isArray((reportResponse.multimodal as any)?.image_analyses)
-              ? ((reportResponse.multimodal as any).image_analyses as ImageAnalysisResult[])
+            imageAnalyses: Array.isArray(multimodal?.image_analyses)
+              ? multimodal.image_analyses
               : currentImageAnalyses,
-            fusionReport: ((reportResponse.multimodal as any)?.fusion_report as MultimodalFusionReport | undefined) ?? null,
+            fusionReport: multimodal?.fusion_report ?? null,
           });
           setPhase('report', 'done');
           void _persistPhaseSnapshot(get, 'report', 'done');
@@ -835,9 +868,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       donePhases.content = 'done';
     }
 
+    const multimodal = (detail.report.multimodal ?? null) as MultimodalMeta | null;
     set({
       text: detail.input_text,
-      enhancedText: (detail.report.multimodal as any)?.enhanced_text ?? null,
+      enhancedText: multimodal?.enhanced_text ?? null,
       error: null,
       detectData: detail.detect_data ?? null,
       sourceMeta: {
@@ -848,12 +882,12 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       claims,
       rawEvidences: evidences,
       evidences,
-      images: Array.isArray((detail.report.multimodal as any)?.images) ? ((detail.report.multimodal as any).images as StoredImage[]) : [],
-      ocrResults: Array.isArray((detail.report.multimodal as any)?.ocr_results) ? ((detail.report.multimodal as any).ocr_results as ImageOCRResult[]) : [],
-      imageAnalyses: Array.isArray((detail.report.multimodal as any)?.image_analyses)
-        ? ((detail.report.multimodal as any).image_analyses as ImageAnalysisResult[])
+      images: Array.isArray(multimodal?.images) ? multimodal.images : [],
+      ocrResults: Array.isArray(multimodal?.ocr_results) ? multimodal.ocr_results : [],
+      imageAnalyses: Array.isArray(multimodal?.image_analyses)
+        ? multimodal.image_analyses
         : [],
-      fusionReport: ((detail.report.multimodal as any)?.fusion_report as MultimodalFusionReport | undefined) ?? null,
+      fusionReport: multimodal?.fusion_report ?? null,
       report: detail.report,
       simulation: simulation ?? detail.simulation ?? null,
       content: detail.content ?? null,
@@ -973,13 +1007,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
             claim_reports: reportResponse.claim_reports,
             multimodal: reportResponse.multimodal ?? null,
           };
+          const multimodal = (reportResponse.multimodal ?? null) as MultimodalMeta | null;
           set({
             report: reportResult,
             recordId: newRecordId,
-            imageAnalyses: Array.isArray((reportResponse.multimodal as any)?.image_analyses)
-              ? ((reportResponse.multimodal as any).image_analyses as ImageAnalysisResult[])
+            imageAnalyses: Array.isArray(multimodal?.image_analyses)
+              ? multimodal.image_analyses
               : currentImageAnalyses,
-            fusionReport: ((reportResponse.multimodal as any)?.fusion_report as MultimodalFusionReport | undefined) ?? null,
+            fusionReport: multimodal?.fusion_report ?? null,
           });
           setPhase('report', 'done');
           void _persistPhaseSnapshot(get, 'report', 'done');

@@ -84,7 +84,7 @@ export function RiskOverview({ data, isLoading }: RiskOverviewProps) {
   };
 
   return (
-    <Card className="transition-opacity duration-500 animate-in fade-in">
+    <Card className="h-full border-white/70 bg-[linear-gradient(160deg,rgba(255,255,255,0.80),rgba(241,247,251,0.78))] transition-opacity duration-500 animate-in fade-in">
       <CardHeader>
         <CardTitle>风险概览</CardTitle>
         <CardDescription>快速风险快照评估</CardDescription>
@@ -94,16 +94,16 @@ export function RiskOverview({ data, isLoading }: RiskOverviewProps) {
           <Badge variant={labelVariants[data.label] ?? "default"}>
             {zhRiskLabel(data.label)}
           </Badge>
-          <span className="text-sm text-muted-foreground">
-            风险分数: <span className="font-semibold text-foreground">{data.score}</span>
-          </span>
-          <span className="text-sm text-muted-foreground">
-            置信度: <span className="font-semibold text-foreground">{(data.confidence * 100).toFixed(0)}%</span>
-          </span>
+          <div className="rounded-full border border-white/65 bg-white/76 px-3 py-1 text-xs font-medium text-[color:var(--muted-strong)] shadow-[0_8px_20px_rgba(26,54,78,0.06)]">
+            风险分数 {data.score}
+          </div>
+          <div className="rounded-full border border-white/65 bg-white/76 px-3 py-1 text-xs font-medium text-[color:var(--muted-strong)] shadow-[0_8px_20px_rgba(26,54,78,0.06)]">
+            置信度 {(data.confidence * 100).toFixed(0)}%
+          </div>
         </div>
 
         {/* 风险评分进度条 */}
-        <div className="space-y-1">
+        <div className="space-y-2 rounded-[1.25rem] border border-white/65 bg-white/74 p-3 shadow-[0_10px_24px_rgba(26,54,78,0.05)]">
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>安全</span>
             <span>高危</span>
@@ -116,11 +116,11 @@ export function RiskOverview({ data, isLoading }: RiskOverviewProps) {
           </div>
         </div>
 
-        <ul className="space-y-1.5 text-sm">
+        <ul className="space-y-2 text-sm">
           {reasons.length > 0 ? (
             reasons.map((reason, index) => (
-              <li key={index} className="flex items-start gap-2">
-                <span className="text-muted-foreground mt-0.5">•</span>
+              <li key={index} className="flex items-start gap-2 rounded-[1.15rem] border border-white/60 bg-white/74 px-3 py-2.5 shadow-[0_8px_18px_rgba(26,54,78,0.04)]">
+                <span className="mt-0.5 text-muted-foreground">•</span>
                 <span>{zhText(reason)}</span>
               </li>
             ))

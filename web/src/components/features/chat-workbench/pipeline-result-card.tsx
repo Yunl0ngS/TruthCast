@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from 'react';
 import dynamic from 'next/dynamic';
+import type { EChartsOption } from 'echarts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -29,7 +30,15 @@ import {
   ShieldX,
 } from 'lucide-react';
 import { zhEmotion, zhRiskLabel, zhSimulationStance, zhText } from '@/lib/i18n';
-import type { ClaimItem, DetectResponse, EvidenceItem, PhaseState, ReportResponse } from '@/types';
+import type {
+  ClaimItem,
+  DetectResponse,
+  EvidenceItem,
+  NarrativeItem,
+  PhaseState,
+  ReportResponse,
+  TimelineItem,
+} from '@/types';
 import type { SimulationStage } from '@/services/api';
 
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false });
@@ -367,6 +376,9 @@ const PHASE_LABEL: Record<keyof PhaseState, string> = {
   content: '应对内容',
 };
 
+const REPORT_SECTIONS = ['tldr', 'findings', 'risks'] as const;
+type ReportSection = (typeof REPORT_SECTIONS)[number];
+
 export function PipelineProgressCard({ meta }: { meta: PipelineProgressMeta }) {
   const phases = meta.phases ?? ({} as PhaseState);
   const status = meta.status ?? 'idle';
@@ -402,8 +414,8 @@ export function PipelineProgressCard({ meta }: { meta: PipelineProgressMeta }) {
 
         <div className="flex flex-wrap gap-2">
           {(Object.keys(PHASE_LABEL) as Array<keyof PhaseState>).map((p) => (
-            <Badge key={p} variant={variantFor((phases as any)?.[p] ?? 'idle')}>
-              {PHASE_LABEL[p]}：{(phases as any)?.[p] ?? 'idle'}
+            <Badge key={p} variant={variantFor(phases[p] ?? 'idle')}>
+              {PHASE_LABEL[p]}：{phases[p] ?? 'idle'}
             </Badge>
           ))}
         </div>
@@ -420,7 +432,7 @@ export function ActivePhaseProgressCard({ taskId, phase, status, lastEvent, erro
     return 'outline' as const;
   };
 
-  const phaseTitle = (PHASE_LABEL as any)?.[phase] ?? String(phase);
+  const phaseTitle = PHASE_LABEL[phase] ?? String(phase);
 
   const shortTaskId = (() => {
     if (!taskId) return null;
@@ -460,7 +472,7 @@ export function ActivePhaseProgressCard({ taskId, phase, status, lastEvent, erro
 
 export function DetectResultCard({ meta }: { meta: DetectCardMeta }) {
   const data = meta.detectData ?? null;
-  const reasons = Array.isArray(data?.reasons) ? data!.reasons : [];
+  const reasons = useMemo(() => (Array.isArray(data?.reasons) ? data.reasons : []), [data]);
   const confidencePct =
     typeof data?.confidence === 'number' ? `${Math.round(data.confidence * 100)}%` : 'N/A';
 
@@ -589,7 +601,7 @@ export function DetectResultCard({ meta }: { meta: DetectCardMeta }) {
 }
 
 export function ClaimsResultCard({ meta }: { meta: ClaimsCardMeta }) {
-  const claims = Array.isArray(meta.claims) ? meta.claims : [];
+  const claims = useMemo(() => (Array.isArray(meta.claims) ? meta.claims : []), [meta.claims]);
   const status = meta.status ?? (meta.error ? 'failed' : claims.length ? 'done' : 'idle');
 
   const md = useMemo(() => {
@@ -607,7 +619,7 @@ export function ClaimsResultCard({ meta }: { meta: ClaimsCardMeta }) {
       lines.push(meta.error);
     }
     return lines.join('\n');
-  }, [claims, meta.createdAt, meta.error, meta.inputLength, meta.inputPreview, meta.taskId]);
+  }, [claims, meta.createdAt, meta.error, meta.taskId]);
 
   const jsonText = useMemo(() => safeStringify({ meta, claims }), [claims, meta]);
 
@@ -691,15 +703,15 @@ export function ClaimsResultCard({ meta }: { meta: ClaimsCardMeta }) {
 }
 
 export function EvidenceResultCard({ meta }: { meta: EvidenceCardMeta }) {
-  const claims = Array.isArray(meta.claims) ? meta.claims : [];
+  const claims = useMemo(() => (Array.isArray(meta.claims) ? meta.claims : []), [meta.claims]);
   const claimMap = useMemo(() => {
     const m = new Map<string, ClaimItem>();
     for (const c of claims) m.set(c.claim_id, c);
     return m;
   }, [claims]);
 
-  const raw = Array.isArray(meta.rawEvidences) ? meta.rawEvidences : [];
-  const aligned = Array.isArray(meta.evidences) ? meta.evidences : [];
+  const raw = useMemo(() => (Array.isArray(meta.rawEvidences) ? meta.rawEvidences : []), [meta.rawEvidences]);
+  const aligned = useMemo(() => (Array.isArray(meta.evidences) ? meta.evidences : []), [meta.evidences]);
   const status = meta.status ?? (meta.error ? 'failed' : aligned.length || raw.length ? 'done' : 'idle');
 
   const md = useMemo(() => {
@@ -1110,7 +1122,7 @@ export function ReportResultCard({ meta }: { meta: ReportCardMeta }) {
 
   const jsonText = useMemo(() => safeStringify({ meta, report }), [meta, report]);
 
-  const [activeSection, setActiveSection] = useState<'tldr' | 'findings' | 'risks'>('tldr');
+  const [activeSection, setActiveSection] = useState<ReportSection>('tldr');
 
   const riskLabelZh = (label?: string | null) => {
     const raw = String(label ?? '').trim();
@@ -1184,7 +1196,15 @@ export function ReportResultCard({ meta }: { meta: ReportCardMeta }) {
             <KpiTile label="主张条数" value={Array.isArray(report.claim_reports) ? report.claim_reports.length : 0} />
           </div>
 
-          <Tabs value={activeSection} onValueChange={(v) => setActiveSection(v as any)} className="w-full">
+          <Tabs
+            value={activeSection}
+            onValueChange={(value) => {
+              if (REPORT_SECTIONS.includes(value as ReportSection)) {
+                setActiveSection(value as ReportSection);
+              }
+            }}
+            className="w-full"
+          >
             <TabsList className="w-full grid grid-cols-3">
               <TabsTrigger value="tldr">TL;DR</TabsTrigger>
               <TabsTrigger value="findings">发现</TabsTrigger>
@@ -1348,6 +1368,12 @@ export function SimulationStageResultCard({ meta }: { meta: SimulationStageCardM
   const status: CardStatus = meta.status ?? (meta.error ? 'failed' : 'done');
   const sim = meta.simulation ?? null;
   const durationText = formatDuration(meta.durationMs);
+  const emotionDistribution = sim?.emotion_distribution;
+  const stanceDistribution = sim?.stance_distribution;
+  const narratives = sim?.narratives as NarrativeItem[] | undefined;
+  const flashpoints = sim?.flashpoints;
+  const timeline = sim?.timeline as TimelineItem[] | undefined;
+  const suggestion = sim?.suggestion;
 
   const jsonText = useMemo(() => safeStringify(meta), [meta]);
 
@@ -1361,10 +1387,8 @@ export function SimulationStageResultCard({ meta }: { meta: SimulationStageCardM
     }
 
     if (meta.stage === 'emotion' && sim) {
-      const emo = (sim as any).emotion_distribution as Record<string, number> | undefined;
-      const stance = (sim as any).stance_distribution as Record<string, number> | undefined;
-      const topE = topDistribution(emo, 10);
-      const topS = topDistribution(stance, 10);
+      const topE = topDistribution(emotionDistribution, 10);
+      const topS = topDistribution(stanceDistribution, 10);
       if (topE.length) {
         lines.push('', '#### 情绪分布');
         for (const [k, v] of topE) lines.push(`- ${zhEmotion(k)}：${Math.round(v * 100)}%`);
@@ -1376,7 +1400,6 @@ export function SimulationStageResultCard({ meta }: { meta: SimulationStageCardM
     }
 
     if (meta.stage === 'narratives' && sim) {
-      const narratives = (sim as any).narratives as Array<any> | undefined;
       if (Array.isArray(narratives) && narratives.length) {
         lines.push('', '#### 叙事分支');
         for (const n of narratives.slice(0, 10)) {
@@ -1391,8 +1414,6 @@ export function SimulationStageResultCard({ meta }: { meta: SimulationStageCardM
     }
 
     if (meta.stage === 'flashpoints' && sim) {
-      const flashpoints = (sim as any).flashpoints as string[] | undefined;
-      const timeline = (sim as any).timeline as Array<any> | undefined;
       if (Array.isArray(flashpoints) && flashpoints.length) {
         lines.push('', '#### 引爆点（Top）');
         for (const f of flashpoints.slice(0, 10)) lines.push(`- ${f}`);
@@ -1406,13 +1427,12 @@ export function SimulationStageResultCard({ meta }: { meta: SimulationStageCardM
     }
 
     if (meta.stage === 'suggestion' && sim) {
-      const sug = (sim as any).suggestion as any;
-      if (sug?.summary) {
-        lines.push('', '#### 建议摘要', String(sug.summary));
+      if (suggestion?.summary) {
+        lines.push('', '#### 建议摘要', String(suggestion.summary));
       }
-      if (Array.isArray(sug?.actions) && sug.actions.length) {
+      if (Array.isArray(suggestion?.actions) && suggestion.actions.length) {
         lines.push('', '#### 行动清单（节选）');
-        for (const a of sug.actions.slice(0, 12)) {
+        for (const a of suggestion.actions.slice(0, 12)) {
           lines.push(`- [${a.priority ?? ''}/${a.category ?? ''}] ${a.action ?? ''}`.trim());
           if (a.timeline) lines.push(`  - 时间：${a.timeline}`);
           if (a.responsible) lines.push(`  - 责任方：${a.responsible}`);
@@ -1421,13 +1441,12 @@ export function SimulationStageResultCard({ meta }: { meta: SimulationStageCardM
     }
 
     return lines.join('\n');
-  }, [durationText, meta.createdAt, meta.error, meta.stage, meta.taskId, sim]);
+  }, [durationText, emotionDistribution, flashpoints, meta.createdAt, meta.error, meta.stage, meta.taskId, narratives, sim, stanceDistribution, suggestion, timeline]);
 
-  const emotionOption = useMemo(() => {
+  const emotionOption = useMemo<EChartsOption | null>(() => {
     if (meta.stage !== 'emotion') return null;
-    const dist = (sim as any)?.emotion_distribution as Record<string, number> | undefined;
-    if (!dist || Object.keys(dist).length === 0) return null;
-    const data = Object.entries(dist).map(([name, value]) => ({ name: zhEmotion(name), value }));
+    if (!emotionDistribution || Object.keys(emotionDistribution).length === 0) return null;
+    const data = Object.entries(emotionDistribution).map(([name, value]) => ({ name: zhEmotion(name), value }));
     return {
       tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
       legend: { show: false },
@@ -1442,14 +1461,13 @@ export function SimulationStageResultCard({ meta }: { meta: SimulationStageCardM
           data,
         },
       ],
-    } as const;
-  }, [meta.stage, sim]);
+    };
+  }, [emotionDistribution, meta.stage]);
 
-  const stanceOption = useMemo(() => {
+  const stanceOption = useMemo<EChartsOption | null>(() => {
     if (meta.stage !== 'emotion') return null;
-    const dist = (sim as any)?.stance_distribution as Record<string, number> | undefined;
-    if (!dist || Object.keys(dist).length === 0) return null;
-    const data = Object.entries(dist).map(([name, value]) => ({ name: zhSimulationStance(name), value }));
+    if (!stanceDistribution || Object.keys(stanceDistribution).length === 0) return null;
+    const data = Object.entries(stanceDistribution).map(([name, value]) => ({ name: zhSimulationStance(name), value }));
     return {
       tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
       legend: { show: false },
@@ -1464,8 +1482,8 @@ export function SimulationStageResultCard({ meta }: { meta: SimulationStageCardM
           data,
         },
       ],
-    } as const;
-  }, [meta.stage, sim]);
+    };
+  }, [meta.stage, stanceDistribution]);
 
   return (
     <ResultCardShell
@@ -1507,7 +1525,7 @@ export function SimulationStageResultCard({ meta }: { meta: SimulationStageCardM
             <div className="rounded-md border bg-background p-2">
               <div className="text-xs font-medium text-muted-foreground mb-2">情绪分布（饼图）</div>
               {emotionOption ? (
-                <ReactECharts option={emotionOption as any} style={{ height: 240 }} />
+                <ReactECharts option={emotionOption} style={{ height: 240 }} />
               ) : (
                 <div className="text-sm text-muted-foreground">暂无</div>
               )}
@@ -1515,7 +1533,7 @@ export function SimulationStageResultCard({ meta }: { meta: SimulationStageCardM
             <div className="rounded-md border bg-background p-2">
               <div className="text-xs font-medium text-muted-foreground mb-2">立场分布（饼图）</div>
               {stanceOption ? (
-                <ReactECharts option={stanceOption as any} style={{ height: 240 }} />
+                <ReactECharts option={stanceOption} style={{ height: 240 }} />
               ) : (
                 <div className="text-sm text-muted-foreground">暂无</div>
               )}
@@ -1746,4 +1764,3 @@ export function SimulationStageResultCard({ meta }: { meta: SimulationStageCardM
     </ResultCardShell>
   );
 }
-
