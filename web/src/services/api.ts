@@ -15,6 +15,11 @@ import type {
   PhaseStatus,
   HistoryDetail,
   HistoryItem,
+  MonitorAlert,
+  MonitorHotItem,
+  MonitorStatus,
+  MonitorSubscription,
+  MonitorSubscriptionCreate,
   ReportResponse,
   SimulateResponse,
   StrategyConfig,
@@ -76,6 +81,62 @@ export async function downloadWordExport(payload: ExportData): Promise<void> {
 export async function detect(text: string): Promise<DetectResponse> {
   const { data } = await api.post<DetectResponse>('/detect', { text });
   return data;
+}
+
+export async function getMonitorStatus(): Promise<MonitorStatus> {
+  const { data } = await api.get<MonitorStatus>('/monitor/status');
+  return data;
+}
+
+export async function getMonitorSubscriptions(isActive?: boolean): Promise<MonitorSubscription[]> {
+  const { data } = await api.get<{ items: MonitorSubscription[] }>('/monitor/subscriptions', {
+    params: { is_active: isActive },
+  });
+  return data.items;
+}
+
+export async function createMonitorSubscription(payload: MonitorSubscriptionCreate): Promise<MonitorSubscription> {
+  const { data } = await api.post<MonitorSubscription>('/monitor/subscriptions', payload);
+  return data;
+}
+
+export async function updateMonitorSubscription(
+  id: string,
+  payload: Partial<MonitorSubscriptionCreate> & { is_active?: boolean }
+): Promise<MonitorSubscription> {
+  const { data } = await api.patch<MonitorSubscription>(`/monitor/subscriptions/${id}`, payload);
+  return data;
+}
+
+export async function deleteMonitorSubscription(id: string): Promise<void> {
+  await api.delete(`/monitor/subscriptions/${id}`);
+}
+
+export async function getMonitorHotItems(limit = 20, platform?: string): Promise<MonitorHotItem[]> {
+  const { data } = await api.get<{ items: MonitorHotItem[] }>('/monitor/hot-items', {
+    params: { limit, platform },
+  });
+  return data.items;
+}
+
+export async function triggerMonitorScan(platforms?: string[]): Promise<{
+  scanned_platforms: string[];
+  saved_count: number;
+  total_fetched: number;
+}> {
+  const { data } = await api.post('/monitor/scan', { platforms: platforms ?? [] });
+  return data;
+}
+
+export async function getMonitorAlerts(limit = 50): Promise<MonitorAlert[]> {
+  const { data } = await api.get<{ items: MonitorAlert[] }>('/monitor/alerts', {
+    params: { limit },
+  });
+  return data.items;
+}
+
+export async function acknowledgeMonitorAlert(id: string): Promise<void> {
+  await api.post(`/monitor/alerts/${id}/ack`);
 }
 
 export async function detectWithSignal(text: string, signal?: AbortSignal): Promise<DetectResponse> {

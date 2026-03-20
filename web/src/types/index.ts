@@ -224,6 +224,109 @@ export type HistoryDetail = {
   feedback_note?: string | null;
 };
 
+export type MonitorNotifyChannel = 'webhook' | 'wecom' | 'dingtalk' | 'feishu' | 'email';
+export type MonitorTriggerMode = 'threshold' | 'hit' | 'smart';
+export type MonitorSubscriptionType = 'keyword' | 'topic';
+export type MonitorAlertStatus = 'pending' | 'sent' | 'acknowledged' | 'ignored';
+export type MonitorTrendDirection = 'rising' | 'stable' | 'falling' | 'new';
+
+export type MonitorSubscription = {
+  id: string;
+  user_id: string;
+  name: string;
+  type: MonitorSubscriptionType;
+  keywords: string[];
+  match_mode: 'any' | 'all' | 'regex';
+  platforms: string[];
+  exclude_keywords: string[];
+  trigger_mode: MonitorTriggerMode;
+  risk_threshold: number;
+  smart_threshold: Record<string, unknown>;
+  notify_channels: MonitorNotifyChannel[];
+  notify_config: Record<string, unknown>;
+  notify_template?: string | null;
+  quiet_hours?: Record<string, unknown> | null;
+  is_active: boolean;
+  priority: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MonitorSubscriptionCreate = {
+  name: string;
+  type: MonitorSubscriptionType;
+  keywords: string[];
+  match_mode: 'any' | 'all' | 'regex';
+  platforms: string[];
+  exclude_keywords: string[];
+  trigger_mode: MonitorTriggerMode;
+  risk_threshold: number;
+  notify_channels: MonitorNotifyChannel[];
+  notify_config: Record<string, unknown>;
+  priority?: number;
+};
+
+export type MonitorHotItem = {
+  id: string;
+  platform: string;
+  title: string;
+  url: string;
+  summary?: string | null;
+  cover_image?: string | null;
+  hot_value: number;
+  rank: number;
+  trend: MonitorTrendDirection;
+  risk_score?: number | null;
+  risk_level?: string | null;
+  risk_assessed_at?: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  last_hot_value: number;
+  extra: Record<string, unknown>;
+  raw_data: Record<string, unknown>;
+};
+
+export type MonitorAlert = {
+  id: string;
+  hot_item_id: string;
+  trigger_reason: string;
+  trigger_mode: MonitorTriggerMode;
+  matched_subscriptions: string[];
+  matched_keywords: string[];
+  risk_score: number;
+  risk_level: string;
+  risk_summary?: string | null;
+  hot_item_title: string;
+  hot_item_url: string;
+  hot_item_platform: string;
+  hot_item_hot_value: number;
+  hot_item_rank: number;
+  status: MonitorAlertStatus;
+  priority: number;
+  notify_channels: MonitorNotifyChannel[];
+  notify_results: Array<Record<string, unknown>>;
+  created_at: string;
+  sent_at?: string | null;
+  acknowledged_at?: string | null;
+  acknowledged_by?: string | null;
+  cooldown_until?: string | null;
+};
+
+export type MonitorStatus = {
+  running: boolean;
+  adaptive_mode: boolean;
+  default_interval_minutes: number | null;
+  effective_interval_minutes: number | null;
+  platform_intervals: Record<string, number>;
+  last_scan_at?: string | null;
+  last_scan_summary: Record<string, { fetched: number; new?: number; updated?: number; removed?: number; alert_candidates: number }>;
+  failure_count: number;
+  platform_failures: Record<string, number>;
+  last_error?: { platform: string; message: string; at: string } | null;
+  last_scan_duration_ms?: number | null;
+  platform_durations_ms: Record<string, number>;
+};
+
 export type Phase = 'detect' | 'claims' | 'evidence' | 'report' | 'simulation' | 'content';
 export type PhaseStatus = 'idle' | 'running' | 'done' | 'failed' | 'canceled';
 export type PhaseState = Record<Phase, PhaseStatus>;

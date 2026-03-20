@@ -12,6 +12,7 @@ dependencies = [
   "fastapi>=0.115.0",
   "uvicorn>=0.30.0",
   "pydantic>=2.8.0",
+  "PyYAML>=6.0.2",
   "python-multipart>=0.0.9",
   "json-repair",
   "typer[all]>=0.12.0",
