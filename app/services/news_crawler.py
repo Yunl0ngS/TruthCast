@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 
 import httpx
@@ -9,6 +10,7 @@ from app.services.url_extraction.extractors import (
     extract_with_trafilatura,
 )
 from app.services.url_extraction.metadata import extract_metadata
+from app.services.url_extraction.rendered import render_page
 from app.services.url_extraction.ranker import rank_candidates
 
 logger = get_logger("truthcast.news_crawler")
@@ -65,6 +67,15 @@ def _collect_candidates(html: str) -> list[ContentCandidate]:
     return candidates
 
 
+def _render_fallback_enabled() -> bool:
+    return (os.getenv("TRUTHCAST_URL_EXTRACT_RENDER_FALLBACK", "true") or "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def crawl_news_url(url: str, timeout_sec: float = 15.0) -> CrawledNews:
     """
     抓取新闻 URL 并提取核心内容 (标题, 正文, 发布日期)
@@ -112,6 +123,44 @@ def crawl_news_url(url: str, timeout_sec: float = 15.0) -> CrawledNews:
             ranked.score,
             ranked.fallback_needed,
         )
+
+        if ranked.best is None and ranked.fallback_needed and _render_fallback_enabled():
+            logger.info("新闻抓取：触发渲染fallback url=%s reasons=%s", validated_url, "；".join(ranked.reasons))
+            rendered = render_page(metadata.canonical_url or final_url)
+            if rendered.success:
+                logger.info(
+                    "新闻抓取：渲染fallback完成 url=%s final_url=%s html_len=%s",
+                    validated_url,
+                    rendered.final_url,
+                    len(rendered.html),
+                )
+                rendered_metadata = extract_metadata(rendered.html, rendered.final_url)
+                rendered_candidates = _collect_candidates(rendered.html)
+                rendered_ranked = rank_candidates(rendered_candidates, title_hint=rendered_metadata.title)
+                logger.info(
+                    "新闻抓取：渲染fallback打分完成 url=%s candidate_count=%s confidence=%s score=%.3f fallback_needed=%s",
+                    validated_url,
+                    len(rendered_candidates),
+                    rendered_ranked.confidence,
+                    rendered_ranked.score,
+                    rendered_ranked.fallback_needed,
+                )
+                if rendered_ranked.best is not None:
+                    best = rendered_ranked.best
+                    title = rendered_metadata.title or best.title
+                    return CrawledNews(
+                        title=title,
+                        content=best.content,
+                        publish_date=rendered_metadata.publish_date,
+                        source_url=rendered_metadata.canonical_url or rendered.final_url,
+                        success=True,
+                    )
+            else:
+                logger.warning(
+                    "新闻抓取：渲染fallback失败 url=%s error=%s",
+                    validated_url,
+                    rendered.error_msg,
+                )
 
         if ranked.best is None:
             message = "；".join(ranked.reasons) if ranked.reasons else "无可用候选"

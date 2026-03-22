@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+import os
 
 import httpx
 
@@ -174,3 +175,192 @@ def test_crawl_news_url_logs_fetch_summary(
     assert "HTTP获取成功" in logged
     assert "metadata提取完成" in logged
     assert "候选正文打分完成" in logged
+
+
+@patch("app.core.security.validate_url_for_ssrf", side_effect=lambda url: url)
+@patch("app.services.news_crawler.fetch_page")
+@patch("app.services.news_crawler.extract_metadata")
+@patch("app.services.news_crawler.extract_with_readability")
+@patch("app.services.news_crawler.extract_with_trafilatura")
+@patch("app.services.news_crawler.rank_candidates")
+@patch("app.services.news_crawler.render_page")
+def test_crawl_news_url_uses_rendered_fallback_when_ranked_low(
+    mock_render,
+    mock_rank,
+    mock_trafilatura,
+    mock_readability,
+    mock_metadata,
+    mock_fetch,
+    _mock_validate_url,
+):
+    os.environ["TRUTHCAST_URL_EXTRACT_RENDER_FALLBACK"] = "true"
+    mock_fetch.return_value = ("https://example.com/news", "<html><body>空壳页面</body></html>")
+    mock_metadata.side_effect = [
+        PageMetadata(title="原始标题", publish_date="", site_name="", canonical_url="https://example.com/news", meta_debug={}),
+        PageMetadata(title="渲染标题", publish_date="2026-03-22", site_name="", canonical_url="https://example.com/news", meta_debug={}),
+    ]
+    mock_readability.side_effect = [
+        None,
+        ContentCandidate(
+            extractor_name="readability",
+            title="渲染标题",
+            content="渲染页正文",
+            text_len=5,
+            paragraph_count=1,
+            link_density=0.1,
+            chinese_ratio=1.0,
+            noise_hits=[],
+        ),
+    ]
+    mock_trafilatura.side_effect = [None, None]
+    mock_rank.side_effect = [
+        RankedCandidate(best=None, confidence="low", score=0.0, fallback_needed=True, reasons=["无可用候选"]),
+        RankedCandidate(
+            best=ContentCandidate(
+                extractor_name="readability",
+                title="渲染标题",
+                content="渲染页正文",
+                text_len=5,
+                paragraph_count=1,
+                link_density=0.1,
+                chinese_ratio=1.0,
+                noise_hits=[],
+            ),
+            confidence="medium",
+            score=2.0,
+            fallback_needed=False,
+            reasons=["fallback 成功"],
+        ),
+    ]
+    mock_render.return_value = MagicMock(success=True, final_url="https://example.com/news", html="<html><body><article>渲染页正文</article></body></html>", error_msg="")
+
+    result = crawl_news_url("https://example.com/news")
+
+    assert result.success is True
+    assert result.content == "渲染页正文"
+    assert result.title == "渲染标题"
+
+
+@patch("app.core.security.validate_url_for_ssrf", side_effect=lambda url: url)
+@patch("app.services.news_crawler.fetch_page")
+@patch("app.services.news_crawler.extract_metadata")
+@patch("app.services.news_crawler.extract_with_readability")
+@patch("app.services.news_crawler.extract_with_trafilatura")
+@patch("app.services.news_crawler.rank_candidates")
+@patch("app.services.news_crawler.render_page")
+def test_crawl_news_url_returns_original_failure_when_render_fallback_disabled(
+    mock_render,
+    mock_rank,
+    mock_trafilatura,
+    mock_readability,
+    mock_metadata,
+    mock_fetch,
+    _mock_validate_url,
+):
+    os.environ["TRUTHCAST_URL_EXTRACT_RENDER_FALLBACK"] = "false"
+    mock_fetch.return_value = ("https://example.com/empty", "<html><body>empty</body></html>")
+    mock_metadata.return_value = PageMetadata(title="标题", publish_date="", site_name="", canonical_url="https://example.com/empty", meta_debug={})
+    mock_readability.return_value = None
+    mock_trafilatura.return_value = None
+    mock_rank.return_value = RankedCandidate(best=None, confidence="low", score=0.0, fallback_needed=True, reasons=["无可用候选"])
+
+    result = crawl_news_url("https://example.com/empty")
+
+    assert result.success is False
+    assert mock_render.called is False
+
+
+@patch("app.core.security.validate_url_for_ssrf", side_effect=lambda url: url)
+@patch("app.services.news_crawler.fetch_page")
+@patch("app.services.news_crawler.extract_metadata")
+@patch("app.services.news_crawler.extract_with_readability")
+@patch("app.services.news_crawler.extract_with_trafilatura")
+@patch("app.services.news_crawler.rank_candidates")
+@patch("app.services.news_crawler.render_page")
+def test_crawl_news_url_keeps_failure_when_rendering_fails(
+    mock_render,
+    mock_rank,
+    mock_trafilatura,
+    mock_readability,
+    mock_metadata,
+    mock_fetch,
+    _mock_validate_url,
+):
+    os.environ["TRUTHCAST_URL_EXTRACT_RENDER_FALLBACK"] = "true"
+    mock_fetch.return_value = ("https://example.com/empty", "<html><body>empty</body></html>")
+    mock_metadata.return_value = PageMetadata(title="标题", publish_date="", site_name="", canonical_url="https://example.com/empty", meta_debug={})
+    mock_readability.return_value = None
+    mock_trafilatura.return_value = None
+    mock_rank.return_value = RankedCandidate(best=None, confidence="low", score=0.0, fallback_needed=True, reasons=["无可用候选"])
+    mock_render.return_value = MagicMock(success=False, final_url="https://example.com/empty", html="", error_msg="browser missing")
+
+    result = crawl_news_url("https://example.com/empty")
+
+    assert result.success is False
+    assert "无可用候选" in result.error_msg
+
+
+@patch("app.core.security.validate_url_for_ssrf", side_effect=lambda url: url)
+@patch("app.services.news_crawler.fetch_page")
+@patch("app.services.news_crawler.extract_metadata")
+@patch("app.services.news_crawler.extract_with_readability")
+@patch("app.services.news_crawler.extract_with_trafilatura")
+@patch("app.services.news_crawler.rank_candidates")
+@patch("app.services.news_crawler.render_page")
+def test_crawl_news_url_logs_render_fallback(
+    mock_render,
+    mock_rank,
+    mock_trafilatura,
+    mock_readability,
+    mock_metadata,
+    mock_fetch,
+    _mock_validate_url,
+):
+    os.environ["TRUTHCAST_URL_EXTRACT_RENDER_FALLBACK"] = "true"
+    mock_fetch.return_value = ("https://example.com/news", "<html><body>空壳页面</body></html>")
+    mock_metadata.side_effect = [
+        PageMetadata(title="原始标题", publish_date="", site_name="", canonical_url="https://example.com/news", meta_debug={}),
+        PageMetadata(title="渲染标题", publish_date="2026-03-22", site_name="", canonical_url="https://example.com/news", meta_debug={}),
+    ]
+    mock_readability.side_effect = [
+        None,
+        ContentCandidate(
+            extractor_name="readability",
+            title="渲染标题",
+            content="渲染页正文",
+            text_len=5,
+            paragraph_count=1,
+            link_density=0.1,
+            chinese_ratio=1.0,
+            noise_hits=[],
+        ),
+    ]
+    mock_trafilatura.side_effect = [None, None]
+    mock_rank.side_effect = [
+        RankedCandidate(best=None, confidence="low", score=0.0, fallback_needed=True, reasons=["无可用候选"]),
+        RankedCandidate(
+            best=ContentCandidate(
+                extractor_name="readability",
+                title="渲染标题",
+                content="渲染页正文",
+                text_len=5,
+                paragraph_count=1,
+                link_density=0.1,
+                chinese_ratio=1.0,
+                noise_hits=[],
+            ),
+            confidence="medium",
+            score=2.0,
+            fallback_needed=False,
+            reasons=["fallback 成功"],
+        ),
+    ]
+    mock_render.return_value = MagicMock(success=True, final_url="https://example.com/news", html="<html><body><article>渲染页正文</article></body></html>", error_msg="")
+
+    with patch("app.services.news_crawler.logger.info") as mock_info:
+        result = crawl_news_url("https://example.com/news")
+
+    assert result.success is True
+    logged = " | ".join(str(call) for call in mock_info.call_args_list)
+    assert "触发渲染fallback" in logged
+    assert "渲染fallback完成" in logged
