@@ -1,5 +1,6 @@
 import os
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -9,6 +10,38 @@ from app.core.logger import get_logger
 from app.services.json_utils import safe_json_loads
 
 logger = get_logger("truthcast.news_crawler")
+
+
+def _as_float(value: str | None, fallback: float, minimum: float = 0.0) -> float:
+    try:
+        return max(minimum, float(value or fallback))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _crawler_http_timeout(timeout_sec: float) -> httpx.Timeout:
+    return httpx.Timeout(timeout_sec)
+
+
+def _crawler_llm_timeout() -> httpx.Timeout:
+    total_timeout = _as_float(os.getenv("TRUTHCAST_CRAWLER_LLM_TIMEOUT_SEC"), 45.0, minimum=1.0)
+    read_timeout = _as_float(
+        os.getenv("TRUTHCAST_CRAWLER_LLM_READ_TIMEOUT_SEC"),
+        total_timeout,
+        minimum=1.0,
+    )
+    return httpx.Timeout(total_timeout, connect=total_timeout, read=read_timeout, write=total_timeout)
+
+
+def _crawler_llm_max_retries() -> int:
+    try:
+        return max(1, int(os.getenv("TRUTHCAST_CRAWLER_LLM_MAX_RETRIES", "2")))
+    except (TypeError, ValueError):
+        return 2
+
+
+def _crawler_llm_retry_delay_sec() -> float:
+    return _as_float(os.getenv("TRUTHCAST_CRAWLER_LLM_RETRY_DELAY_SEC"), 1.0, minimum=0.0)
 
 
 @dataclass
@@ -47,7 +80,7 @@ def crawl_news_url(url: str, timeout_sec: float = 15.0) -> CrawledNews:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         with httpx.Client(
-            timeout=timeout_sec, follow_redirects=True, headers=headers
+            timeout=_crawler_http_timeout(timeout_sec), follow_redirects=True, headers=headers
         ) as client:
             resp = client.get(url)
             resp.raise_for_status()
@@ -97,8 +130,8 @@ def _preprocess_html(html: str) -> str:
     html = re.sub(r"<!--.*?-->", "", html, flags=re.DOTALL)
     # 移除多余空白
     html = re.sub(r"\s+", " ", html).strip()
-    # 截断太长的内容 (例如保留前 15000 字符，通常够了)
-    return html[:15000]
+    # 截断太长的内容，避免正文提取阶段输入过大导致超时
+    return html[:10000]
 
 
 def _extract_news_with_llm(url: str, html: str) -> CrawledNews:
@@ -145,18 +178,51 @@ def _extract_news_with_llm(url: str, html: str) -> CrawledNews:
 
     try:
         logger.info("新闻抓取：开始LLM提取 url=%s html_len=%s model=%s", url, len(html), model)
-        with httpx.Client(timeout=30.0) as client:
-            resp = client.post(
-                f"{base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            raw_content = data["choices"][0]["message"]["content"]
+        max_retries = _crawler_llm_max_retries()
+        retry_delay_sec = _crawler_llm_retry_delay_sec()
+        timeout = _crawler_llm_timeout()
+        raw_content = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                with httpx.Client(timeout=timeout) as client:
+                    resp = client.post(
+                        f"{base_url}/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    raw_content = data["choices"][0]["message"]["content"]
+                break
+            except httpx.ReadTimeout as exc:
+                logger.warning(
+                    "新闻抓取：LLM提取读取超时 url=%s attempt=%s/%s read_timeout=%ss",
+                    url,
+                    attempt,
+                    max_retries,
+                    timeout.read,
+                )
+                if attempt >= max_retries:
+                    raise
+                if retry_delay_sec > 0:
+                    time.sleep(retry_delay_sec)
+            except httpx.TimeoutException:
+                logger.warning(
+                    "新闻抓取：LLM提取请求超时 url=%s attempt=%s/%s timeout=%ss",
+                    url,
+                    attempt,
+                    max_retries,
+                    timeout.connect,
+                )
+                if attempt >= max_retries:
+                    raise
+                if retry_delay_sec > 0:
+                    time.sleep(retry_delay_sec)
+        if raw_content is None:
+            raise RuntimeError("LLM extraction returned empty content")
 
         res_data = safe_json_loads(raw_content)
         title = str(res_data.get("title", "")).strip()

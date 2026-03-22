@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/sheet';
 
 const navItems = [
-  { href: '/monitor', label: '监测台', icon: RadioTower },
+  { href: '/monitor', label: '实时监测', icon: RadioTower },
   { href: '/', label: '任务输入', icon: Home },
   { href: '/result', label: '检测结果', icon: FileSearch },
   { href: '/simulation', label: '舆情预演', icon: LineChart },
