@@ -12,6 +12,7 @@ import {
   Menu,
   FileText,
   MessageSquare,
+  RadioTower,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -22,18 +23,23 @@ import {
 } from '@/components/ui/sheet';
 
 const navItems = [
-  { href: '/chat', label: '对话工作台', icon: MessageSquare },
+  { href: '/monitor', label: '实时监测', icon: RadioTower },
   { href: '/', label: '任务输入', icon: Home },
   { href: '/result', label: '检测结果', icon: FileSearch },
   { href: '/simulation', label: '舆情预演', icon: LineChart },
   { href: '/content', label: '应对内容', icon: FileText },
   { href: '/history', label: '历史记录', icon: History },
+  { href: '/chat', label: '对话工作台', icon: MessageSquare },
 ];
 
 export function Header() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const currentItem = navItems.find((item) => item.href === pathname);
+  const currentItem = navItems.find((item) =>
+    item.href === '/'
+      ? pathname === '/'
+      : pathname === item.href || pathname.startsWith(`${item.href}/`)
+  );
 
   return (
     <header className="sticky top-0 z-50 w-full px-2.5 py-3 sm:px-4 md:px-5">
@@ -63,7 +69,10 @@ export function Header() {
         <nav className="hidden lg:flex items-center gap-1 rounded-2xl border border-white/60 bg-white/56 p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.4)]">
           {navItems.map((item) => {
             const Icon = item.icon;
-            const isActive = pathname === item.href;
+            const isActive =
+              item.href === '/'
+                ? pathname === '/'
+                : pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
               <Link
                 key={item.href}
@@ -117,7 +126,10 @@ export function Header() {
             <nav className="flex flex-col space-y-2">
               {navItems.map((item) => {
                 const Icon = item.icon;
-                const isActive = pathname === item.href;
+                const isActive =
+                  item.href === '/'
+                    ? pathname === '/'
+                    : pathname === item.href || pathname.startsWith(`${item.href}/`);
                 return (
                   <Link
                     key={item.href}

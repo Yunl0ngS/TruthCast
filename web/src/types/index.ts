@@ -224,6 +224,199 @@ export type HistoryDetail = {
   feedback_note?: string | null;
 };
 
+export type MonitorNotifyChannel = 'webhook' | 'wecom' | 'dingtalk' | 'feishu' | 'email';
+export type MonitorTriggerMode = 'threshold' | 'hit' | 'smart';
+export type MonitorSubscriptionType = 'keyword' | 'topic';
+export type MonitorAlertStatus = 'pending' | 'sent' | 'acknowledged' | 'ignored';
+export type MonitorTrendDirection = 'rising' | 'stable' | 'falling' | 'new';
+
+export type MonitorSubscription = {
+  id: string;
+  user_id: string;
+  name: string;
+  type: MonitorSubscriptionType;
+  keywords: string[];
+  match_mode: 'any' | 'all' | 'regex';
+  platforms: string[];
+  exclude_keywords: string[];
+  trigger_mode: MonitorTriggerMode;
+  risk_threshold: number;
+  smart_threshold: Record<string, unknown>;
+  notify_channels: MonitorNotifyChannel[];
+  notify_config: Record<string, unknown>;
+  notify_template?: string | null;
+  quiet_hours?: Record<string, unknown> | null;
+  is_active: boolean;
+  priority: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MonitorSubscriptionCreate = {
+  name: string;
+  type: MonitorSubscriptionType;
+  keywords: string[];
+  match_mode: 'any' | 'all' | 'regex';
+  platforms: string[];
+  exclude_keywords: string[];
+  trigger_mode: MonitorTriggerMode;
+  risk_threshold: number;
+  notify_channels: MonitorNotifyChannel[];
+  notify_config: Record<string, unknown>;
+  priority?: number;
+};
+
+export type MonitorHotItem = {
+  id: string;
+  platform: string;
+  title: string;
+  url: string;
+  summary?: string | null;
+  cover_image?: string | null;
+  hot_value: number;
+  rank: number;
+  trend: MonitorTrendDirection;
+  risk_score?: number | null;
+  risk_level?: string | null;
+  risk_assessed_at?: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  last_hot_value: number;
+  extra: Record<string, unknown>;
+  raw_data: Record<string, unknown>;
+};
+
+export type MonitorAlert = {
+  id: string;
+  hot_item_id: string;
+  trigger_reason: string;
+  trigger_mode: MonitorTriggerMode;
+  matched_subscriptions: string[];
+  matched_keywords: string[];
+  risk_score: number;
+  risk_level: string;
+  risk_summary?: string | null;
+  hot_item_title: string;
+  hot_item_url: string;
+  hot_item_platform: string;
+  hot_item_hot_value: number;
+  hot_item_rank: number;
+  status: MonitorAlertStatus;
+  priority: number;
+  notify_channels: MonitorNotifyChannel[];
+  notify_results: Array<Record<string, unknown>>;
+  created_at: string;
+  sent_at?: string | null;
+  acknowledged_at?: string | null;
+  acknowledged_by?: string | null;
+  cooldown_until?: string | null;
+};
+
+export type MonitorStatus = {
+  running: boolean;
+  adaptive_mode: boolean;
+  manual_scan_auto_analyze_default: boolean;
+  enabled_platforms: Array<{ key: string; display_name: string }>;
+  default_interval_minutes: number | null;
+  effective_interval_minutes: number | null;
+  platform_intervals: Record<string, number>;
+  last_scan_at?: string | null;
+  last_scan_summary: Record<string, { fetched: number; new?: number; updated?: number; removed?: number; alert_candidates: number }>;
+  failure_count: number;
+  platform_failures: Record<string, number>;
+  last_error?: { platform: string; message: string; at: string } | null;
+  last_scan_duration_ms?: number | null;
+  platform_durations_ms: Record<string, number>;
+};
+
+export type MonitorScanResponse = {
+  scanned_platforms: string[];
+  saved_count: number;
+  total_fetched: number;
+  window_id?: string | null;
+  auto_analyze: boolean;
+  analysis_scheduled: boolean;
+};
+
+export type MonitorAnalysisStage =
+  | 'hot_item'
+  | 'crawl'
+  | 'risk_snapshot'
+  | 'report'
+  | 'simulation'
+  | 'content'
+  | 'completed';
+
+export type MonitorAnalysisResult = {
+  id: string;
+  hot_item_id: string;
+  platform: string;
+  source_url: string;
+  crawl_status: string;
+  crawl_title?: string | null;
+  crawl_content?: string | null;
+  crawl_publish_date?: string | null;
+  risk_snapshot_score?: number | null;
+  risk_snapshot_label?: string | null;
+  risk_snapshot_reasons: string[];
+  raw_evidences: EvidenceItem[];
+  evidences: EvidenceItem[];
+  current_stage: MonitorAnalysisStage;
+  report_score?: number | null;
+  report_level?: string | null;
+  report_data?: ReportResponse | null;
+  simulation_status: string;
+  simulation_data?: SimulateResponse | null;
+  content_generation_status: string;
+  content_data?: ContentDraft | null;
+  last_error?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MonitorScanTriggerType = 'scheduled' | 'manual';
+export type MonitorScanWindowStatus = 'running' | 'completed' | 'failed';
+
+export type MonitorScanWindow = {
+  id: string;
+  window_start: string;
+  window_end: string;
+  trigger_type: MonitorScanTriggerType;
+  status: MonitorScanWindowStatus;
+  platforms: string[];
+  fetched_count: number;
+  deduplicated_count: number;
+  analyzed_count: number;
+  duplicate_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MonitorWindowItem = {
+  id: string;
+  window_id: string;
+  platform: string;
+  platform_display_name?: string | null;
+  hot_item_id?: string | null;
+  analysis_result_id?: string | null;
+  duplicate_of_analysis_result_id?: string | null;
+  analysis_status: 'pending' | 'running' | 'done' | 'failed';
+  dedupe_key: string;
+  title: string;
+  url: string;
+  hot_value: number;
+  rank: number;
+  trend: MonitorTrendDirection;
+  is_duplicate_across_windows: boolean;
+  created_at: string;
+  analysis_result?: MonitorAnalysisResult | null;
+};
+
+export type MonitorScanWindowDetail = {
+  window: MonitorScanWindow;
+  items: MonitorWindowItem[];
+};
+
 export type Phase = 'detect' | 'claims' | 'evidence' | 'report' | 'simulation' | 'content';
 export type PhaseStatus = 'idle' | 'running' | 'done' | 'failed' | 'canceled';
 export type PhaseState = Record<Phase, PhaseStatus>;

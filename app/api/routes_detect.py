@@ -176,8 +176,14 @@ def detect_report(payload: ReportRequest) -> dict:
 @router.post("/url", response_model=UrlDetectResponse)
 def detect_url(payload: UrlDetectRequest) -> UrlDetectResponse:
     """抓取新闻 URL 并进行初始风险评估"""
+    logger.info("链接核查：收到 URL 抓取请求 url=%s", payload.url)
     crawled = crawl_news_url(payload.url)
     if not crawled.success:
+        logger.warning(
+            "链接核查：抓取失败 url=%s error=%s",
+            payload.url,
+            crawled.error_msg,
+        )
         return UrlDetectResponse(
             url=payload.url,
             title="",
@@ -187,9 +193,25 @@ def detect_url(payload: UrlDetectRequest) -> UrlDetectResponse:
             error_msg=crawled.error_msg,
         )
 
-    # 获取风险快照
+    # 获取风险快照：链接核查支路统一使用“标题 + 正文”并开启新闻门控，
+    # 以保证与后续新闻分析链路的判定口径一致。
+    merged_text = f"{crawled.title}\n\n{crawled.content}".strip()
+    logger.info(
+        "链接核查：抓取成功 url=%s title=%s content_len=%s publish_date=%s",
+        payload.url,
+        (crawled.title or "")[:80],
+        len(crawled.content or ""),
+        crawled.publish_date or "",
+    )
     with llm_slot():
-        risk_result = detect_risk_snapshot(crawled.content)
+        risk_result = detect_risk_snapshot(merged_text, enable_news_gate=True)
+    logger.info(
+        "链接核查：风险快照完成 url=%s score=%s label=%s reason_count=%s",
+        payload.url,
+        risk_result.score,
+        risk_result.label,
+        len(risk_result.reasons or []),
+    )
 
     risk_resp = DetectResponse(
         label=risk_result.label,

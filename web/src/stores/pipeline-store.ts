@@ -17,6 +17,7 @@ import type {
   SimulateResponse,
   StoredImage,
   HistoryDetail,
+  MonitorAnalysisResult,
   StrategyConfig,
 } from '@/types';
 import {
@@ -86,11 +87,12 @@ interface PipelineState {
     silent?: boolean;
     force?: boolean;
   }) => Promise<void>;
-  runPipeline: (opts?: { taskId?: string | null }) => Promise<void>;
+  runPipeline: (opts?: { taskId?: string | null; skipDetect?: boolean }) => Promise<void>;
   interruptPipeline: () => void;
   retryPhase: (phase: Phase) => Promise<void>;
   retryFailed: () => Promise<void>;
   loadFromHistory: (detail: HistoryDetail, simulation?: SimulateResponse | null) => void;
+  loadFromMonitorAnalysisResult: (result: MonitorAnalysisResult) => void;
   crawlUrl: (url: string) => Promise<void>;
   reset: () => void;
 }
@@ -168,6 +170,47 @@ type MultimodalMeta = {
   image_analyses?: ImageAnalysisResult[];
   fusion_report?: MultimodalFusionReport | null;
 };
+
+function _flattenReportEvidence(report: ReportResponse): { claims: ClaimItem[]; evidences: EvidenceItem[] } {
+  const claims: ClaimItem[] = report.claim_reports.map((row) => row.claim);
+  const evidences: EvidenceItem[] = [];
+  const seenEvidenceIds = new Set<string>();
+
+  for (const row of report.claim_reports) {
+    for (const evidence of row.evidences) {
+      if (!seenEvidenceIds.has(evidence.evidence_id)) {
+        evidences.push(evidence);
+        seenEvidenceIds.add(evidence.evidence_id);
+      }
+    }
+  }
+
+  return { claims, evidences };
+}
+
+function _buildDetectDataFromMonitorResult(result: MonitorAnalysisResult): DetectResponse | null {
+  if (result.risk_snapshot_score == null && !result.risk_snapshot_label) {
+    return null;
+  }
+
+  const riskReasons = Array.isArray(result.risk_snapshot_reasons)
+    ? result.risk_snapshot_reasons.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
+  const suspiciousPoints = Array.isArray(result.report_data?.suspicious_points)
+    ? result.report_data.suspicious_points.filter((item): item is string => typeof item === 'string')
+    : [];
+  const reasons = (riskReasons.length > 0 ? riskReasons : suspiciousPoints).slice(0, 5);
+  if (reasons.length === 0 && result.last_error) {
+    reasons.push(result.last_error);
+  }
+
+  return {
+    label: result.risk_snapshot_label ?? 'needs_review',
+    confidence: (result.risk_snapshot_score ?? 0) / 100,
+    score: result.risk_snapshot_score ?? 0,
+    reasons,
+  };
+}
 
 function isMultimodalDetectResponse(
   result: DetectResponse | MultimodalDetectResponse
@@ -318,9 +361,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       void _persistPhaseSnapshot(get, 'detect', 'done');
       toast.success('链接抓取与初步评估完成');
 
-      // 抓取成功后，自动接续后续流水线
-      // 调用 runPipeline({ taskId }) 确保全链路快照完整
-      await get().runPipeline({ taskId });
+      // 抓取成功后，复用 /detect/url 返回的风险快照与策略，从 claims 阶段继续，
+      // 避免重复执行一次文本元分析和风险快照。
+      await get().runPipeline({ taskId, skipDetect: true });
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         setPhase('detect', 'canceled');
@@ -502,9 +545,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
     set({
       taskId,
       error: null,
-      detectData: null,
-      enhancedText: null,
-      strategy: null,
+      detectData: opts?.skipDetect ? get().detectData : null,
+      enhancedText: opts?.skipDetect ? get().enhancedText : null,
+      strategy: opts?.skipDetect ? get().strategy : null,
       sourceMeta: opts?.taskId ? get().sourceMeta : null,
       claims: [],
       rawEvidences: [],
@@ -524,8 +567,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
     });
 
     // 初始化时也写一次（方便刷新后至少能恢复“任务已开始”）
-    void _persistPhaseSnapshot(get, 'detect', 'idle', {
-      payload: { note: 'task_started' },
+    void _persistPhaseSnapshot(get, 'detect', opts?.skipDetect ? 'done' : 'idle', {
+      payload: opts?.skipDetect ? _phasePayload(get, 'detect') : { note: 'task_started' },
     });
 
     toast.info('开始分析...');
@@ -547,48 +590,54 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       );
     };
 
-    setPhase('detect', 'running');
-    void _persistPhaseSnapshot(get, 'detect', 'running');
     let analysisText = text;
-    const detectPromise = (get().images.length > 0
-      ? detectMultimodalWithSignal(text, get().images as ImageInput[], signal)
-      : detectWithSignal(text, signal))
-      .then((result) => {
-        if (isMultimodalDetectResponse(result)) {
-          analysisText = result.enhanced_text || text;
-          set({
-            detectData: result.detect_data ?? null,
-            enhancedText: result.enhanced_text || null,
-            strategy: result.detect_data?.strategy ?? null,
-            images: result.images ?? [],
-            ocrResults: result.ocr_results ?? [],
-            imageAnalyses: result.image_analyses ?? [],
-            fusionReport: result.fusion_report ?? null,
-          });
-        } else {
-          set({ detectData: result, strategy: result.strategy ?? null, enhancedText: null });
-        }
-        setPhase('detect', 'done');
-        void _persistPhaseSnapshot(get, 'detect', 'done');
-        toast.success('风险快照完成');
-        if (!isMultimodalDetectResponse(result) && result.truncated) {
-          toast.warning('输入文本较长，已自动截断至 8000 字符以内进行分析');
-        }
-      })
-      .catch((err) => {
-        if (isAbortError(err)) {
-          setPhase('detect', 'canceled');
-          void _persistPhaseSnapshot(get, 'detect', 'canceled', {
-            error_message: 'aborted',
-          });
-          return;
-        }
-        setPhase('detect', 'failed');
-        void _persistPhaseSnapshot(get, 'detect', 'failed', {
-          error_message: err instanceof Error ? err.message : '未知错误',
-        });
-        pushError(`风险快照失败：${err instanceof Error ? err.message : '未知错误'}`);
-      });
+    const detectPromise = opts?.skipDetect
+      ? Promise.resolve().then(() => {
+          analysisText = get().enhancedText || text;
+          setPhase('detect', 'done');
+          void _persistPhaseSnapshot(get, 'detect', 'done');
+        })
+      : (setPhase('detect', 'running'),
+        void _persistPhaseSnapshot(get, 'detect', 'running'),
+        (get().images.length > 0
+          ? detectMultimodalWithSignal(text, get().images as ImageInput[], signal)
+          : detectWithSignal(text, signal))
+          .then((result) => {
+            if (isMultimodalDetectResponse(result)) {
+              analysisText = result.enhanced_text || text;
+              set({
+                detectData: result.detect_data ?? null,
+                enhancedText: result.enhanced_text || null,
+                strategy: result.detect_data?.strategy ?? null,
+                images: result.images ?? [],
+                ocrResults: result.ocr_results ?? [],
+                imageAnalyses: result.image_analyses ?? [],
+                fusionReport: result.fusion_report ?? null,
+              });
+            } else {
+              set({ detectData: result, strategy: result.strategy ?? null, enhancedText: null });
+            }
+            setPhase('detect', 'done');
+            void _persistPhaseSnapshot(get, 'detect', 'done');
+            toast.success('风险快照完成');
+            if (!isMultimodalDetectResponse(result) && result.truncated) {
+              toast.warning('输入文本较长，已自动截断至 8000 字符以内进行分析');
+            }
+          })
+          .catch((err) => {
+            if (isAbortError(err)) {
+              setPhase('detect', 'canceled');
+              void _persistPhaseSnapshot(get, 'detect', 'canceled', {
+                error_message: 'aborted',
+              });
+              return;
+            }
+            setPhase('detect', 'failed');
+            void _persistPhaseSnapshot(get, 'detect', 'failed', {
+              error_message: err instanceof Error ? err.message : '未知错误',
+            });
+            pushError(`风险快照失败：${err instanceof Error ? err.message : '未知错误'}`);
+          }));
 
     const deepScanPromise = (async () => {
       // Wait for detect to complete to get strategy
@@ -842,18 +891,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
   },
 
   loadFromHistory: (detail: HistoryDetail, simulation?: SimulateResponse | null) => {
-    const claims: ClaimItem[] = detail.report.claim_reports.map((cr) => cr.claim);
-    
-    const evidences: EvidenceItem[] = [];
-    const seenEvidenceIds = new Set<string>();
-    for (const cr of detail.report.claim_reports) {
-      for (const ev of cr.evidences) {
-        if (!seenEvidenceIds.has(ev.evidence_id)) {
-          evidences.push(ev);
-          seenEvidenceIds.add(ev.evidence_id);
-        }
-      }
-    }
+    const { claims, evidences } = _flattenReportEvidence(detail.report);
 
     const donePhases: PhaseState = {
       detect: detail.detect_data ? 'done' : 'idle',
@@ -894,6 +932,65 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       phases: donePhases,
       isFromHistory: true,
       recordId: detail.id,
+    });
+  },
+
+  loadFromMonitorAnalysisResult: (result: MonitorAnalysisResult) => {
+    const report = result.report_data ?? null;
+    const simulation = result.simulation_data ?? null;
+    const flattened = report ? _flattenReportEvidence(report) : { claims: [], evidences: [] };
+    const claims = flattened.claims;
+    const rawEvidences = Array.isArray(result.raw_evidences) && result.raw_evidences.length > 0
+      ? result.raw_evidences
+      : flattened.evidences;
+    const evidences = Array.isArray(result.evidences) && result.evidences.length > 0
+      ? result.evidences
+      : flattened.evidences;
+
+    const phases: PhaseState = {
+      detect: result.risk_snapshot_score != null ? 'done' : 'idle',
+      claims: report ? 'done' : 'idle',
+      evidence: report ? 'done' : 'idle',
+      report: report ? 'done' : 'idle',
+      simulation: simulation ? 'done' : 'idle',
+      content: result.content_data ? 'done' : 'idle',
+    };
+
+    const crawlText = (result.crawl_content || '').trim();
+    const crawlTitle = (result.crawl_title || report?.source_title || '').trim();
+    const mergedText =
+      (crawlTitle && crawlText ? `${crawlTitle}\n\n${crawlText}` : crawlTitle || crawlText || result.source_url).trim();
+
+    set({
+      taskId: null,
+      restorableTaskId: null,
+      restorableUpdatedAt: null,
+      text: mergedText,
+      error: result.last_error ?? null,
+      enhancedText: null,
+      detectData: _buildDetectDataFromMonitorResult(result),
+      strategy: null,
+      sourceMeta: {
+        source_url: result.source_url,
+        source_title: result.crawl_title ?? report?.source_title ?? null,
+        source_publish_date: result.crawl_publish_date ?? report?.source_publish_date ?? null,
+      },
+      claims,
+      rawEvidences,
+      evidences,
+      images: [],
+      ocrResults: [],
+      imageAnalyses: [],
+      fusionReport: null,
+      report,
+      simulation,
+      simulationStage: null,
+      simulationStageAt: null,
+      content: result.content_data ?? null,
+      phases,
+      abortController: null,
+      isFromHistory: false,
+      recordId: null,
     });
   },
 

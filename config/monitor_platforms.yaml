@@ -1,0 +1,114 @@
+defaults:
+  scan_interval_minutes: 60
+  fetch_top_n: 5
+  risk_snapshot_threshold: 40
+  report_threshold_for_simulation: 50
+
+platforms:
+  # 当前启用：按用户要求，仅开启澎湃新闻、联合早报、华尔街见闻最热
+  - key: thepaper
+    display_name: 澎湃新闻
+    newsnow_id: thepaper
+    enabled: true
+
+  - key: ifeng
+    display_name: 凤凰网
+    newsnow_id: ifeng
+    enabled: false
+
+  - key: cankaoxiaoxi
+    display_name: 参考消息
+    newsnow_id: cankaoxiaoxi
+    enabled: false
+
+  - key: wallstreetcn-hot
+    display_name: 华尔街见闻最热
+    newsnow_id: wallstreetcn-hot
+    enabled: false
+
+  - key: wallstreetcn-quick
+    display_name: 华尔街见闻快讯
+    newsnow_id: wallstreetcn-quick
+    enabled: false
+
+  - key: tencent-hot
+    display_name: 腾讯新闻综合早报
+    newsnow_id: tencent-hot
+    enabled: false
+
+  - key: zaobao
+    display_name: 联合早报
+    newsnow_id: zaobao
+    enabled: true
+
+  - key: cls-hot
+    display_name: 财联社热门
+    newsnow_id: cls-hot
+    enabled: true
+
+  - key: cls-telegraph
+    display_name: 财联社电报
+    newsnow_id: cls-telegraph
+    enabled: false
+
+  # 默认关闭：社交舆情入口，按需启用补充传播面
+  - key: weibo
+    display_name: 微博
+    newsnow_id: weibo
+    enabled: false
+
+  - key: zhihu
+    display_name: 知乎
+    newsnow_id: zhihu
+    enabled: false
+
+  - key: douyin
+    display_name: 抖音
+    newsnow_id: douyin
+    enabled: false
+
+  - key: bilibili
+    display_name: 哔哩哔哩热搜
+    newsnow_id: bilibili-hot-search
+    enabled: false
+
+  - key: kuaishou
+    display_name: 快手
+    newsnow_id: kuaishou
+    enabled: false
+
+  - key: tieba
+    display_name: 百度贴吧热议
+    newsnow_id: tieba
+    enabled: false
+
+  # 默认关闭：科技 / 开发者 / 垂直社区
+  - key: 36kr
+    display_name: 36氪快讯
+    newsnow_id: 36kr-quick
+    enabled: false
+
+  - key: ithome
+    display_name: IT之家
+    newsnow_id: ithome
+    enabled: false
+
+  - key: juejin
+    display_name: 掘金
+    newsnow_id: juejin
+    enabled: false
+
+  - key: sspai
+    display_name: 少数派
+    newsnow_id: sspai
+    enabled: false
+
+  - key: v2ex
+    display_name: V2EX 最新分享
+    newsnow_id: v2ex-share
+    enabled: false
+
+  - key: github
+    display_name: GitHub Trending Today
+    newsnow_id: github-trending-today
+    enabled: false

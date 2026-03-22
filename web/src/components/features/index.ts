@@ -6,3 +6,4 @@ export { SimulationView } from './simulation-view';
 export { HistoryList } from './history-list';
 export { ExportButton } from './export';
 export { ClarificationCard, FAQList, PlatformScripts } from './content-view';
+export { MonitorDashboard, SubscriptionManager, AlertsList } from './monitor';
