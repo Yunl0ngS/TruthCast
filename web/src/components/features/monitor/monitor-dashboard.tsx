@@ -76,6 +76,10 @@ function formatWindowRange(start: string, end: string) {
   return `${startDate.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })} - ${endDate.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
 }
 
+function formatGroupedWindowRange(start: Date, end: Date) {
+  return `${start.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })} - ${end.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
+}
+
 function filterWindowItems(detail: MonitorScanWindowDetail | null | undefined, platformFilter: string) {
   if (!detail) return [];
   if (platformFilter === 'all') return detail.items;
@@ -98,6 +102,49 @@ function filterEnabledItems(
   const enabledItems = detail.items.filter((item) => enabledPlatformKeys.has(item.platform));
   if (platformFilter === 'all') return enabledItems;
   return enabledItems.filter((item) => item.platform === platformFilter);
+}
+
+function groupHistoryWindows(
+  windows: MonitorScanWindowDetail[],
+  hours: number
+): Array<{
+  key: string;
+  label: string;
+  items: MonitorWindowItem[];
+  fetchedCount: number;
+  deduplicatedCount: number;
+  analyzedCount: number;
+  duplicateCount: number;
+}> {
+  const groupCount = 6;
+  const bucketSize = Math.max(1, Math.floor(hours / groupCount));
+  const grouped: Array<{
+    key: string;
+    label: string;
+    items: MonitorWindowItem[];
+    fetchedCount: number;
+    deduplicatedCount: number;
+    analyzedCount: number;
+    duplicateCount: number;
+  }> = [];
+
+  for (let index = 0; index < groupCount; index += 1) {
+    const chunk = windows.slice(index * bucketSize, (index + 1) * bucketSize);
+    if (!chunk.length) continue;
+    const start = new Date(chunk[chunk.length - 1].window.window_start);
+    const end = new Date(chunk[0].window.window_end);
+    grouped.push({
+      key: `${start.toISOString()}-${end.toISOString()}`,
+      label: formatGroupedWindowRange(start, end),
+      items: chunk.flatMap((window) => window.items),
+      fetchedCount: chunk.reduce((sum, window) => sum + window.window.fetched_count, 0),
+      deduplicatedCount: chunk.reduce((sum, window) => sum + window.window.deduplicated_count, 0),
+      analyzedCount: chunk.reduce((sum, window) => sum + window.window.analyzed_count, 0),
+      duplicateCount: chunk.reduce((sum, window) => sum + window.window.duplicate_count, 0),
+    });
+  }
+
+  return grouped;
 }
 
 function WindowNewsCard({
@@ -253,6 +300,7 @@ export function MonitorDashboard() {
   const router = useRouter();
   const [platformFilter, setPlatformFilter] = useState<string>('all');
   const [historyHours, setHistoryHours] = useState<number>(6);
+  const [historyGroupIndex, setHistoryGroupIndex] = useState<number>(0);
   const [analyzingItemId, setAnalyzingItemId] = useState<string | null>(null);
   const { status, isLoading: statusLoading, refresh: refreshStatus } = useMonitorStatus();
   const { window: latestWindow, isLoading: latestLoading, refresh: refreshLatest } = useLatestMonitorWindow();
@@ -279,6 +327,11 @@ export function MonitorDashboard() {
       })),
     [historyWindows, enabledPlatformKeys, platformFilter]
   );
+  const groupedHistory = useMemo(
+    () => groupHistoryWindows(filteredHistory.filter((window) => window.items.length > 0), historyHours),
+    [filteredHistory, historyHours]
+  );
+  const activeHistoryGroup = groupedHistory[historyGroupIndex] ?? groupedHistory[0] ?? null;
   const latestHighRiskCount = latestItems.filter((item) => (item.analysis_result?.risk_snapshot_score ?? 0) >= 70).length;
   const manualScanAutoAnalyze = Boolean(status?.manual_scan_auto_analyze_default);
 
@@ -507,7 +560,10 @@ export function MonitorDashboard() {
                   type="button"
                   size="sm"
                   variant={historyHours === hours ? 'default' : 'outline'}
-                  onClick={() => setHistoryHours(hours)}
+                  onClick={() => {
+                    setHistoryHours(hours);
+                    setHistoryGroupIndex(0);
+                  }}
                   className="rounded-full"
                 >
                   最近 {hours} 小时
@@ -523,42 +579,57 @@ export function MonitorDashboard() {
                 <Skeleton key={index} className="h-52 w-full rounded-[1.35rem]" />
               ))}
             </div>
-          ) : filteredHistory.length === 0 ? (
+          ) : groupedHistory.length === 0 ? (
             <div className="rounded-[1.3rem] border border-dashed border-border/70 bg-white/60 px-4 py-10 text-center text-sm text-muted-foreground">
               当前时间范围内还没有历史窗口数据。
             </div>
           ) : (
-            <div className="max-h-[48rem] space-y-4 overflow-y-auto pr-2">
-              {filteredHistory.map((window) => (
-                <div key={window.window.id} className="rounded-[1.35rem] border border-white/70 bg-white/76 p-4 shadow-[0_14px_30px_rgba(26,54,78,0.06)]">
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                {groupedHistory.map((group, index) => (
+                  <Button
+                    key={group.key}
+                    type="button"
+                    size="sm"
+                    variant={historyGroupIndex === index ? 'default' : 'outline'}
+                    onClick={() => setHistoryGroupIndex(index)}
+                    className="rounded-full"
+                  >
+                    {group.label}
+                  </Button>
+                ))}
+              </div>
+
+              {activeHistoryGroup ? (
+                <div className="rounded-[1.35rem] border border-white/70 bg-white/76 p-4 shadow-[0_14px_30px_rgba(26,54,78,0.06)]">
                   <div className="flex flex-col gap-3 border-b border-border/60 pb-4 md:flex-row md:items-center md:justify-between">
                     <div>
                       <div className="text-base font-medium text-foreground">
-                        {formatWindowRange(window.window.window_start, window.window.window_end)}
+                        {activeHistoryGroup.label}
                       </div>
                       <div className="mt-1 text-sm text-muted-foreground">
-                        抓取 {window.window.fetched_count} 条，去重后 {window.window.deduplicated_count} 条，新检测 {window.window.analyzed_count} 条
+                        抓取 {activeHistoryGroup.fetchedCount} 条，去重后 {activeHistoryGroup.deduplicatedCount} 条，新检测 {activeHistoryGroup.analyzedCount} 条
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Badge variant="outline" className="border-white/70 bg-[color:var(--panel-soft)]">
-                        复用历史 {window.window.duplicate_count}
+                        复用历史 {activeHistoryGroup.duplicateCount}
                       </Badge>
                       <Badge variant="outline" className="border-white/70 bg-[color:var(--panel-soft)]">
-                        {window.items.length} 条展示结果
+                        {activeHistoryGroup.items.length} 条展示结果
                       </Badge>
                     </div>
                   </div>
 
-                  <div className="mt-4 space-y-3">
-                    {window.items.length === 0 ? (
+                  <div className="mt-4 max-h-[48rem] space-y-3 overflow-y-auto pr-2">
+                    {activeHistoryGroup.items.length === 0 ? (
                       <div className="rounded-[1.2rem] border border-dashed border-border/70 bg-white/60 px-4 py-8 text-center text-sm text-muted-foreground">
-                        当前筛选条件下，这个历史窗口没有新闻。
+                        当前筛选条件下，这个时间段没有新闻。
                       </div>
                     ) : (
-                      window.items.map((item) => (
+                      activeHistoryGroup.items.map((item) => (
                         <WindowNewsCard
-                          key={item.id}
+                          key={`${activeHistoryGroup.key}-${item.id}`}
                           item={item}
                           onOpenAnalysis={openAnalysisTarget}
                           onAnalyze={handleAnalyzeItem}
@@ -568,7 +639,7 @@ export function MonitorDashboard() {
                     )}
                   </div>
                 </div>
-              ))}
+              ) : null}
             </div>
           )}
         </CardContent>
