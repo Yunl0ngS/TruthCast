@@ -9,6 +9,10 @@ from app.services.url_extraction.extractors import (
     extract_with_readability,
     extract_with_trafilatura,
 )
+from app.services.url_extraction.llm_postprocess import (
+    postprocess_extracted_content,
+    rescue_extracted_candidates,
+)
 from app.services.url_extraction.metadata import extract_metadata
 from app.services.url_extraction.rendered import render_page
 from app.services.url_extraction.ranker import rank_candidates
@@ -76,6 +80,15 @@ def _render_fallback_enabled() -> bool:
     }
 
 
+def _llm_enhance_enabled() -> bool:
+    return (os.getenv("TRUTHCAST_URL_EXTRACT_LLM_ENABLED", "false") or "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def crawl_news_url(url: str, timeout_sec: float = 15.0) -> CrawledNews:
     """
     抓取新闻 URL 并提取核心内容 (标题, 正文, 发布日期)
@@ -114,6 +127,7 @@ def crawl_news_url(url: str, timeout_sec: float = 15.0) -> CrawledNews:
         )
 
         candidates = _collect_candidates(html)
+        rescue_candidates: list[ContentCandidate] = list(candidates)
         ranked = rank_candidates(candidates, title_hint=metadata.title)
         logger.info(
             "新闻抓取：候选正文打分完成 url=%s candidate_count=%s confidence=%s score=%.3f fallback_needed=%s",
@@ -136,6 +150,7 @@ def crawl_news_url(url: str, timeout_sec: float = 15.0) -> CrawledNews:
                 )
                 rendered_metadata = extract_metadata(rendered.html, rendered.final_url)
                 rendered_candidates = _collect_candidates(rendered.html)
+                rescue_candidates.extend(rendered_candidates)
                 rendered_ranked = rank_candidates(rendered_candidates, title_hint=rendered_metadata.title)
                 logger.info(
                     "新闻抓取：渲染fallback打分完成 url=%s candidate_count=%s confidence=%s score=%.3f fallback_needed=%s",
@@ -148,10 +163,38 @@ def crawl_news_url(url: str, timeout_sec: float = 15.0) -> CrawledNews:
                 if rendered_ranked.best is not None:
                     best = rendered_ranked.best
                     title = rendered_metadata.title or best.title
+                    if _llm_enhance_enabled():
+                        logger.info("新闻抓取：LLM后处理开始 url=%s source=rendered_fallback", validated_url)
+                        enhanced = postprocess_extracted_content(
+                            title=title,
+                            content=best.content,
+                            publish_date=rendered_metadata.publish_date,
+                            source_url=rendered_metadata.canonical_url or rendered.final_url,
+                        )
+                        if enhanced is not None and enhanced.content:
+                            logger.info("新闻抓取：LLM后处理成功 url=%s", validated_url)
+                            title = enhanced.title or title
+                            best = ContentCandidate(
+                                extractor_name=best.extractor_name,
+                                title=title,
+                                content=enhanced.content,
+                                text_len=len(enhanced.content),
+                                paragraph_count=best.paragraph_count,
+                                link_density=best.link_density,
+                                chinese_ratio=best.chinese_ratio,
+                                noise_hits=best.noise_hits,
+                                raw_score=best.raw_score,
+                            )
+                            publish_date = enhanced.publish_date or rendered_metadata.publish_date
+                        else:
+                            logger.info("新闻抓取：LLM后处理未生效 url=%s", validated_url)
+                            publish_date = rendered_metadata.publish_date
+                    else:
+                        publish_date = rendered_metadata.publish_date
                     return CrawledNews(
                         title=title,
                         content=best.content,
-                        publish_date=rendered_metadata.publish_date,
+                        publish_date=publish_date,
                         source_url=rendered_metadata.canonical_url or rendered.final_url,
                         success=True,
                     )
@@ -161,6 +204,25 @@ def crawl_news_url(url: str, timeout_sec: float = 15.0) -> CrawledNews:
                     validated_url,
                     rendered.error_msg,
                 )
+
+        if ranked.best is None and _llm_enhance_enabled():
+            logger.info("新闻抓取：LLM兜底救援开始 url=%s candidate_count=%s", validated_url, len(rescue_candidates))
+            rescued = rescue_extracted_candidates(
+                title=metadata.title,
+                publish_date=metadata.publish_date,
+                source_url=metadata.canonical_url or final_url,
+                candidates=rescue_candidates,
+            )
+            if rescued is not None and rescued.content:
+                logger.info("新闻抓取：LLM兜底救援成功 url=%s", validated_url)
+                return CrawledNews(
+                    title=rescued.title or metadata.title,
+                    content=rescued.content,
+                    publish_date=rescued.publish_date or metadata.publish_date,
+                    source_url=metadata.canonical_url or final_url,
+                    success=True,
+                )
+            logger.info("新闻抓取：LLM兜底救援未生效 url=%s", validated_url)
 
         if ranked.best is None:
             message = "；".join(ranked.reasons) if ranked.reasons else "无可用候选"
@@ -176,18 +238,44 @@ def crawl_news_url(url: str, timeout_sec: float = 15.0) -> CrawledNews:
 
         best = ranked.best
         title = metadata.title or best.title
+        publish_date = metadata.publish_date
+        if _llm_enhance_enabled():
+            logger.info("新闻抓取：LLM后处理开始 url=%s source=primary", validated_url)
+            enhanced = postprocess_extracted_content(
+                title=title,
+                content=best.content,
+                publish_date=metadata.publish_date,
+                source_url=metadata.canonical_url or final_url,
+            )
+            if enhanced is not None and enhanced.content:
+                logger.info("新闻抓取：LLM后处理成功 url=%s", validated_url)
+                title = enhanced.title or title
+                best = ContentCandidate(
+                    extractor_name=best.extractor_name,
+                    title=title,
+                    content=enhanced.content,
+                    text_len=len(enhanced.content),
+                    paragraph_count=best.paragraph_count,
+                    link_density=best.link_density,
+                    chinese_ratio=best.chinese_ratio,
+                    noise_hits=best.noise_hits,
+                    raw_score=best.raw_score,
+                )
+                publish_date = enhanced.publish_date or metadata.publish_date
+            else:
+                logger.info("新闻抓取：LLM后处理未生效 url=%s", validated_url)
         logger.info(
             "新闻抓取：最终正文选型完成 url=%s extractor=%s title=%s content_len=%s publish_date=%s",
             validated_url,
             best.extractor_name,
             title[:80],
             len(best.content),
-            metadata.publish_date or "",
+            publish_date or "",
         )
         return CrawledNews(
             title=title,
             content=best.content,
-            publish_date=metadata.publish_date,
+            publish_date=publish_date,
             source_url=metadata.canonical_url or final_url,
             success=True,
         )
