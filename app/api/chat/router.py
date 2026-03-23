@@ -247,7 +247,7 @@ def chat(payload: ChatRequest) -> ChatResponse:
 
     content = (
         "已完成一次全链路分析，并写入历史记录。\n\n"
-        f"- 风险快照: {_zh_risk_label(risk.label)}（score={risk.score}）\n"
+        f"- 风险初判: {_zh_risk_label(risk.label)}（score={risk.score}）\n"
         f"- 主张数: {len(claims)}\n"
         f"- 对齐证据数: {len(aligned)}\n"
         f"- 报告风险: {_zh_risk_label(report.get('risk_label'))}（{report.get('risk_score')}）\n"

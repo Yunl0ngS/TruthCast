@@ -451,7 +451,7 @@ def build_intent_clarify_message(raw_text: str) -> ChatMessage:
         content=(
             "我收到一段文本，但当前意图还不够明确。\n\n"
             "你希望我怎么处理这段内容？\n"
-            "- 做完整分析（风险快照->主张->证据->对齐->报告）\n"
+            "- 做完整分析（风险初判->主张->证据->对齐->报告）\n"
             "- 或直接选择单技能（主张/证据/对齐/报告/预演/公关响应）\n\n"
             f"文本预览：{preview}"
         ),
@@ -589,22 +589,22 @@ def run_rewrite(args: ToolRewriteArgs) -> ChatMessage:
     if style == "short":
         content = (
             f"改写（短版）：结论为【{risk_label}】（score={risk_score}）。\n"
-            + ("风险快照原因：" + "；".join([str(x) for x in reasons[:3]]) + "\n" if reasons else "")
+            + ("风险初判原因：" + "；".join([str(x) for x in reasons[:3]]) + "\n" if reasons else "")
             + ("可疑点：" + "；".join([str(x) for x in suspicious_points[:3]]) + "\n" if suspicious_points else "")
             + "（提示：可用 /more_evidence 或 /retry evidence 补充证据）"
         )
     elif style == "friendly":
         content = (
             f"改写（亲切版）：目前的辅助判断是【{risk_label}】（score={risk_score}）。\n"
-            "我主要参考了风险快照的触发原因，以及报告里整理的可疑点/证据对齐结果。\n"
+            "我主要参考了风险初判的触发原因，以及报告里整理的可疑点/证据对齐结果。\n"
             + ("你可以重点留意：\n- " + "\n- ".join([str(x) for x in suspicious_points[:3]]) + "\n" if suspicious_points else "")
             + "如果你希望我再多找一些证据，可以直接输入 /more_evidence。"
         )
     else:
         content = (
             f"改写（中性版）：综合判断为【{risk_label}】（score={risk_score}）。\n"
-            "依据来源：风险快照触发原因 + 报告可疑点 + 主张-证据对齐结果。\n"
-            + ("风险快照原因（节选）：\n- " + "\n- ".join([str(x) for x in reasons[:3]]) + "\n" if reasons else "")
+            "依据来源：风险初判触发原因 + 报告可疑点 + 主张-证据对齐结果。\n"
+            + ("风险初判原因（节选）：\n- " + "\n- ".join([str(x) for x in reasons[:3]]) + "\n" if reasons else "")
             + ("报告可疑点（节选）：\n- " + "\n- ".join([str(x) for x in suspicious_points[:3]]) + "\n" if suspicious_points else "")
         )
 
@@ -729,7 +729,7 @@ def run_why(args: ToolWhyArgs) -> ChatMessage:
         blocks.append(
             {
                 "kind": "section",
-                "title": "风险快照触发原因",
+                "title": "风险初判触发原因",
                 "items": [str(r) for r in reasons[:5]],
                 "collapsed": False,
             }
@@ -771,10 +771,10 @@ def run_why(args: ToolWhyArgs) -> ChatMessage:
         )
 
     lines: list[str] = []
-    lines.append("解释（最小可用）：本结论来自风险快照 + 报告阶段对主张与证据的综合判断。")
+    lines.append("解释（最小可用）：本结论来自风险初判 + 报告阶段对主张与证据的综合判断。")
     lines.append("")
     lines.append(
-        f"- 风险快照：{detect_data.get('label', record.get('risk_label'))}（score={detect_data.get('score', record.get('risk_score'))}）"
+        f"- 风险初判：{detect_data.get('label', record.get('risk_label'))}（score={detect_data.get('score', record.get('risk_score'))}）"
     )
     if reasons:
         lines.append("  - 触发原因：")
@@ -900,7 +900,7 @@ def run_analyze_stream(session_id: str, args: ToolAnalyzeArgs) -> Iterator[str]:
 
     with llm_slot():
         risk = detect_risk_snapshot(text, force=args.force, enable_news_gate=True)
-    yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 风险快照：完成（{risk.label}，score={risk.score}）\n', 'session_id': session_id}).model_dump_json()}\n\n"
+    yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 风险初判：完成（{risk.label}，score={risk.score}）\n', 'session_id': session_id}).model_dump_json()}\n\n"
 
     if (not args.force) and risk.strategy and risk.strategy.is_news is False:
         reason = risk.strategy.news_reason or "文本新闻特征不足"
@@ -969,7 +969,7 @@ def run_analyze_stream(session_id: str, args: ToolAnalyzeArgs) -> Iterator[str]:
         role="assistant",
         content=(
             "已完成一次全链路分析，并写入历史记录。\n\n"
-            f"- 风险快照: {risk.label}（score={risk.score}）\n"
+            f"- 风险初判: {risk.label}（score={risk.score}）\n"
             f"- 主张数: {len(claims)}\n"
             f"- 对齐证据数: {len(aligned)}\n"
             f"- 报告风险: {report.get('risk_label')}（{report.get('risk_score')}）\n"
@@ -1018,7 +1018,7 @@ def run_compare(args: ToolCompareArgs) -> ChatMessage:
     lines.append("")
     lines.append("【记录 1】")
     lines.append(f"- record_id: {record_1['id']}")
-    lines.append(f"- 风险快照: {detect_1.get('label', record_1.get('risk_label'))} (score={detect_1.get('score', record_1.get('risk_score'))})")
+    lines.append(f"- 风险初判: {detect_1.get('label', record_1.get('risk_label'))} (score={detect_1.get('score', record_1.get('risk_score'))})")
     lines.append(f"- 报告风险: {report_1.get('risk_label')} (score={report_1.get('risk_score')})")
     lines.append(f"- 场景: {report_1.get('detected_scenario')}")
     lines.append(f"- 主张数: {len(report_1.get('claim_reports', []))}")
@@ -1026,7 +1026,7 @@ def run_compare(args: ToolCompareArgs) -> ChatMessage:
 
     lines.append("【记录 2】")
     lines.append(f"- record_id: {record_2['id']}")
-    lines.append(f"- 风险快照: {detect_2.get('label', record_2.get('risk_label'))} (score={detect_2.get('score', record_2.get('risk_score'))})")
+    lines.append(f"- 风险初判: {detect_2.get('label', record_2.get('risk_label'))} (score={detect_2.get('score', record_2.get('risk_score'))})")
     lines.append(f"- 报告风险: {report_2.get('risk_label')} (score={report_2.get('risk_score')})")
     lines.append(f"- 场景: {report_2.get('detected_scenario')}")
     lines.append(f"- 主张数: {len(report_2.get('claim_reports', []))}")
@@ -1170,7 +1170,7 @@ def run_deep_dive(args: ToolDeepDiveArgs) -> ChatMessage:
         lines.append(f"- 创建时间: {record.get('created_at')}")
         lines.append(f"- 更新时间: {record.get('updated_at')}")
         if detect_data.get("reasons"):
-            lines.append("- 风险快照触发原因:")
+            lines.append("- 风险初判触发原因:")
             for r in detect_data.get("reasons", [])[:3]:
                 lines.append(f"  - {r}")
         lines.append("")

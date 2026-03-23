@@ -346,7 +346,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
         throw new Error(crawlResult.error_msg || '抓取失败');
       }
 
-      // 抓取成功后立刻填充输入新闻，避免等待风险快照完成才显示。
+      // 抓取成功后立刻填充输入新闻，避免等待风险初判完成才显示。
       const title = (crawlResult.title || '').trim();
       const content = (crawlResult.content || '').trim();
       const mergedText = title ? `${title}\n\n${content}` : content;
@@ -361,7 +361,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
         },
       });
       void _persistPhaseSnapshot(get, 'detect', 'running');
-      toast.success('链接抓取完成，正在进行风险快照');
+      toast.success('链接抓取完成，正在进行风险初判');
 
       const riskResult = await detectUrlRisk(
         {
@@ -378,9 +378,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       });
       setPhase('detect', 'done');
       void _persistPhaseSnapshot(get, 'detect', 'done');
-      toast.success('风险快照完成');
+      toast.success('风险初判完成');
 
-      // 风险快照完成后，从 claims 阶段继续，避免重复执行一次文本元分析。
+      // 风险初判完成后，从 claims 阶段继续，避免重复执行一次文本元分析。
       await get().runPipeline({ taskId, skipDetect: true });
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
@@ -456,7 +456,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       const latest = await loadLatestPipelineState(opts?.taskId);
       if (!latest.task_id || !latest.updated_at) return;
 
-      // 后端没有任何快照时 phases 可能全 idle；这种情况不覆盖
+      // 后端没有任何阶段记录时 phases 可能全 idle；这种情况不覆盖
       const hasAnySnapshot = (latest.snapshots ?? []).length > 0;
       if (!hasAnySnapshot) return;
 
@@ -638,7 +638,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
             }
             setPhase('detect', 'done');
             void _persistPhaseSnapshot(get, 'detect', 'done');
-            toast.success('风险快照完成');
+            toast.success('风险初判完成');
             if (!isMultimodalDetectResponse(result) && result.truncated) {
               toast.warning('输入文本较长，已自动截断至 8000 字符以内进行分析');
             }
@@ -655,7 +655,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
             void _persistPhaseSnapshot(get, 'detect', 'failed', {
               error_message: err instanceof Error ? err.message : '未知错误',
             });
-            pushError(`风险快照失败：${err instanceof Error ? err.message : '未知错误'}`);
+            pushError(`风险初判失败：${err instanceof Error ? err.message : '未知错误'}`);
           }));
 
     const deepScanPromise = (async () => {
@@ -1020,7 +1020,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
     const effectiveText = get().enhancedText || text;
     
     const phaseNames: Record<Phase, string> = {
-      detect: '风险快照',
+      detect: '风险初判',
       claims: '主张抽取',
       evidence: '证据检索',
       report: '综合报告',
@@ -1056,7 +1056,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
           }
           setPhase('detect', 'done');
           void _persistPhaseSnapshot(get, 'detect', 'done');
-          toast.success('风险快照重试成功');
+          toast.success('风险初判重试成功');
           break;
 
         case 'claims':

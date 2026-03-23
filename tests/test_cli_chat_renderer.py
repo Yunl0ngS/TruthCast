@@ -29,6 +29,13 @@ def test_render_stage_done(capsys):
     assert "主张抽取完成" in out
 
 
+def test_render_risk_stage_done_uses_initial_assessment_label(capsys):
+    renderer = ChatRenderer()
+    renderer.render_stage("risk", "done")
+    out = capsys.readouterr().out
+    assert "风险初判完成" in out
+
+
 def test_render_error(capsys):
     renderer = ChatRenderer()
     renderer.render_error("测试错误")

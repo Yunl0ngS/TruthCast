@@ -38,7 +38,7 @@ function analysisStageLabel(stage: string) {
   const map: Record<string, string> = {
     hot_item: '已入监测',
     crawl: '链接核查',
-    risk_snapshot: '风险快照',
+    risk_snapshot: '风险初判',
     report: '综合报告',
     simulation: '舆情预演',
     content: '公关响应',
@@ -185,7 +185,7 @@ function WindowNewsCard({
             )}
             {analysis?.risk_snapshot_score != null ? (
               <Badge variant={riskVariant(analysis.risk_snapshot_score)}>
-                快照 {analysis.risk_snapshot_score}
+                初判 {analysis.risk_snapshot_score}
               </Badge>
             ) : null}
             {analysis ? (
@@ -219,7 +219,7 @@ function WindowNewsCard({
 
           <div className="grid gap-2 md:grid-cols-3">
             <div className="rounded-2xl bg-[color:var(--panel-soft)]/72 px-3 py-3 text-sm">
-              <div className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted-strong)]">风险快照</div>
+              <div className="text-xs uppercase tracking-[0.16em] text-[color:var(--muted-strong)]">风险初判</div>
               <div className="mt-1 font-medium text-foreground">
                 {analysis?.risk_snapshot_score ?? '--'}
                 {analysis?.risk_snapshot_label ? ` / ${analysis.risk_snapshot_label}` : ''}

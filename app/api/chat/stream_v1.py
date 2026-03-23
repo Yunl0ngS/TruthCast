@@ -191,10 +191,10 @@ def chat_stream(payload: ChatRequest) -> StreamingResponse:
 
             yield f"data: {ChatStreamEvent(type='token', data={'content': '已收到文本，开始分析…\n', 'session_id': session_id}).model_dump_json()}\n\n"
 
-            yield f"data: {ChatStreamEvent(type='token', data={'content': '- 风险快照：计算中…\n', 'session_id': session_id}).model_dump_json()}\n\n"
+            yield f"data: {ChatStreamEvent(type='token', data={'content': '- 风险初判：计算中…\n', 'session_id': session_id}).model_dump_json()}\n\n"
             with llm_slot():
                 risk = detect_risk_snapshot(analyze_text, enable_news_gate=True)
-            yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 风险快照：完成（{risk.label}，score={risk.score}）\n', 'session_id': session_id}).model_dump_json()}\n\n"
+            yield f"data: {ChatStreamEvent(type='token', data={'content': f'- 风险初判：完成（{risk.label}，score={risk.score}）\n', 'session_id': session_id}).model_dump_json()}\n\n"
 
             yield f"data: {ChatStreamEvent(type='token', data={'content': '- 主张抽取：进行中…\n', 'session_id': session_id}).model_dump_json()}\n\n"
             with llm_slot():
@@ -254,7 +254,7 @@ def chat_stream(payload: ChatRequest) -> StreamingResponse:
 
             content = (
                 "已完成一次全链路分析，并写入历史记录。\n\n"
-                f"- 风险快照: {_zh_risk_label(risk.label)}（score={risk.score}）\n"
+                f"- 风险初判: {_zh_risk_label(risk.label)}（score={risk.score}）\n"
                 f"- 主张数: {len(claims)}\n"
                 f"- 对齐证据数: {len(aligned)}\n"
                 f"- 报告风险: {_zh_risk_label(report.get('risk_label'))}（{report.get('risk_score')}）\n"

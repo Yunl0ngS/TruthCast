@@ -9,7 +9,7 @@ import type { Phase, PhaseState } from '@/types';
 import { zhRiskLabel } from '@/lib/i18n';
 
 const PHASE_LABEL: Record<Phase, string> = {
-  detect: '风险快照',
+  detect: '风险初判',
   claims: '主张抽取',
   evidence: '证据检索',
   report: '综合报告',
@@ -135,7 +135,7 @@ export function ContextPanel({
           </div>
 
           <div>
-            <span className="text-muted-foreground">风险快照：</span>
+            <span className="text-muted-foreground">风险初判：</span>
             {detectData ? `${zhRiskLabel(detectData.label)}（${detectData.score}）` : '未生成'}
           </div>
           <div>

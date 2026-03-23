@@ -30,7 +30,7 @@ class ChatRenderer:
     }
 
     _STAGE_NAME = {
-        "risk": "风险快照",
+        "risk": "风险初判",
         "claims": "主张抽取",
         "evidence_search": "证据检索",
         "evidence_align": "证据对齐",

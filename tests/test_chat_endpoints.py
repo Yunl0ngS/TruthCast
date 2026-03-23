@@ -180,6 +180,7 @@ def test_chat_session_stream_ambiguous_text_returns_clarify_message() -> None:
         assert "当前意图还不够明确" in content
         assert "完整分析" in content
         assert "单技能" in content
+        assert "做完整分析（风险初判->主张->证据->对齐->报告）" in content
         assert "主张/证据/对齐/报告/预演/公关响应" in content
 
 

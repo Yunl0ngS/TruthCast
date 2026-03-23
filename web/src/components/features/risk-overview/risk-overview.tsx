@@ -48,7 +48,7 @@ function RiskOverviewEmpty() {
       <CardContent>
         <div className="flex flex-col items-center gap-2 py-6 text-muted-foreground">
           <ShieldAlert className="h-8 w-8 opacity-30" />
-          <p className="text-sm">等待风险快照结果…</p>
+          <p className="text-sm">等待风险初判结果…</p>
           <p className="text-xs opacity-60">提交文本后系统将自动评估</p>
         </div>
       </CardContent>
@@ -87,7 +87,7 @@ export function RiskOverview({ data, isLoading }: RiskOverviewProps) {
     <Card className="h-full border-white/70 bg-[linear-gradient(160deg,rgba(255,255,255,0.80),rgba(241,247,251,0.78))] transition-opacity duration-500 animate-in fade-in">
       <CardHeader>
         <CardTitle>风险概览</CardTitle>
-        <CardDescription>快速风险快照评估</CardDescription>
+        <CardDescription>快速风险初判评估</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-3">

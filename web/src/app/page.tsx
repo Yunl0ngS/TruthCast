@@ -32,7 +32,7 @@ import {
 
 const capabilityCards = [
   {
-    title: '风险快照',
+    title: '风险初判',
     description: '先给出初步风险等级和复杂度判断，决定后续核查深度。',
     icon: Radar,
   },
@@ -195,7 +195,7 @@ export default function HomePage() {
       <PageHero
         eyebrow="TruthCast / Response Cockpit"
         title="TruthCast 事实核查与舆情推演系统"
-        // description="输入文本、链接或图片后，系统会依次给出风险快照、主张抽取、证据链、综合结论与舆情预演。首页既保留直接开工的效率，也提供清晰的产品价值说明。"
+        // description="输入文本、链接或图片后，系统会依次给出风险初判、主张抽取、证据链、综合结论与舆情预演。首页既保留直接开工的效率，也提供清晰的产品价值说明。"
         meta={
           <>
             <div className="rounded-full border border-[color:var(--border-strong)] bg-white/70 px-3 py-1.5 text-xs font-medium text-[color:var(--muted-strong)] shadow-[0_10px_24px_rgba(26,54,78,0.08)]">

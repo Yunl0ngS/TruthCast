@@ -321,7 +321,7 @@ export function ChatWorkbench() {
           setSessionId(s.session_id);
           // 约定：chat 会话的 session_id 作为 pipeline-state 的 task_id
           setTaskId(s.session_id);
-          // 若数据库里已有该 task_id 的快照，则按需恢复（静默，不打 toast）
+          // 若数据库里已有该 task_id 的阶段记录，则按需恢复（静默，不打 toast）
           return hydrateFromLatest({ taskId: s.session_id, silent: true, force: true });
         }
       })
@@ -357,7 +357,7 @@ export function ChatWorkbench() {
       switch (phase) {
         case 'detect': {
           if (status === 'failed') {
-            const id = addMessage('assistant', '风险快照失败（结果卡片如下）');
+            const id = addMessage('assistant', '风险初判失败（结果卡片如下）');
             updateMessage(id, {
               meta: {
                 type: 'detect',
@@ -374,7 +374,7 @@ export function ChatWorkbench() {
             });
             return;
           }
-          const id = addMessage('assistant', '风险快照已完成（结果卡片如下）');
+          const id = addMessage('assistant', '风险初判已完成（结果卡片如下）');
           updateMessage(id, {
             meta: {
               type: 'detect',
@@ -879,7 +879,7 @@ export function ChatWorkbench() {
           </div>
         )}
         <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          <div className="whitespace-nowrap">风险快照：{phases.detect}</div>
+          <div className="whitespace-nowrap">风险初判：{phases.detect}</div>
           <div className="whitespace-nowrap">主张抽取：{phases.claims}</div>
           <div className="whitespace-nowrap">证据处理：{phases.evidence}</div>
           <div className="whitespace-nowrap">综合报告：{phases.report}</div>

@@ -368,7 +368,7 @@ export type ActivePhaseProgressProps = {
 };
 
 const PHASE_LABEL: Record<keyof PhaseState, string> = {
-  detect: '风险快照',
+  detect: '风险初判',
   claims: '主张抽取',
   evidence: '证据处理',
   report: '综合报告',
@@ -484,7 +484,7 @@ export function DetectResultCard({ meta }: { meta: DetectCardMeta }) {
   })();
 
   const md = useMemo(() => {
-    const title = '### 风险快照（对话工作台）';
+    const title = '### 风险初判（对话工作台）';
     const lines: string[] = [title, ''];
     if (meta.taskId) lines.push(`- 任务ID：\`${meta.taskId}\``);
     if (meta.createdAt) lines.push(`- 时间：${meta.createdAt}`);
@@ -514,14 +514,14 @@ export function DetectResultCard({ meta }: { meta: DetectCardMeta }) {
 
   return (
     <ResultCardShell
-      title={shortTaskId ? `风险快照 · ${shortTaskId}` : '风险快照'}
+      title={shortTaskId ? `风险初判 · ${shortTaskId}` : '风险初判'}
       status={status}
       badges={null}
       actions={null}
     >
       {status === 'failed' && meta.error ? (
         <Alert variant="destructive">
-          <AlertTitle>风险快照失败</AlertTitle>
+          <AlertTitle>风险初判失败</AlertTitle>
           <AlertDescription className="whitespace-pre-wrap">{meta.error}</AlertDescription>
         </Alert>
       ) : null}
@@ -529,7 +529,7 @@ export function DetectResultCard({ meta }: { meta: DetectCardMeta }) {
       {status === 'running' ? (
         <Alert>
           <AlertTitle>进行中</AlertTitle>
-          <AlertDescription>正在生成风险快照…</AlertDescription>
+          <AlertDescription>正在生成风险初判…</AlertDescription>
         </Alert>
       ) : null}
 
@@ -589,7 +589,7 @@ export function DetectResultCard({ meta }: { meta: DetectCardMeta }) {
           复制 Markdown
         </Button>
         <JsonDialogButton
-          title="风险快照 JSON"
+          title="风险初判 JSON"
           description="用于调试/留存，不影响正常阅读。"
           jsonText={jsonText}
           fileName="truthcast_detect.json"

@@ -84,9 +84,9 @@ function generateMarkdown(data: ExportData): string {
     lines.push('');
   }
 
-  // 风险快照
+  // 风险初判
   if (data.detectData) {
-    lines.push('## 风险快照');
+    lines.push('## 风险初判');
     lines.push('');
     lines.push(`| 项目 | 值 |`);
     lines.push(`|------|-----|`);
