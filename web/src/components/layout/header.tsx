@@ -28,8 +28,8 @@ const navItems = [
   { href: '/result', label: '检测结果', icon: FileSearch },
   { href: '/simulation', label: '舆情预演', icon: LineChart },
   { href: '/content', label: '公关响应', icon: FileText },
-  { href: '/history', label: '历史记录', icon: History },
   { href: '/chat', label: '对话工作台', icon: MessageSquare },
+  { href: '/history', label: '历史记录', icon: History },
 ];
 
 export function Header() {

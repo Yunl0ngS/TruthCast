@@ -50,22 +50,34 @@ const capabilityCards = [
 
 const roleStories = [
   {
-    title: '调研者 / Investigator',
-    description: '把新闻、链接、截图等输入整理为结构化事实，打通多模态线索。',
+    title: '侦测者',
+    description: '识别文本、链接、图片中的异常信号，完成风险初判与任务分流。',
     icon: Search,
-    accent: '收集事实',
+    accent: '发现异常',
   },
   {
-    title: '判断者 / Evaluator',
-    description: '串起风险、主张、证据和结论，让判断有据可查。',
+    title: '考据者',
+    description: '拆解核心主张，检索外部证据，核对来源与上下文，补齐事实依据。',
+    icon: FileCheck2,
+    accent: '追索依据',
+  },
+  {
+    title: '裁决者',
+    description: '汇总证据与对齐结果，给出风险结论、可信边界和综合判断。',
     icon: FileText,
-    accent: '串联证据',
+    accent: '形成判断',
   },
   {
-    title: '行动者 / Operator',
-    description: '生成传播预演与应对建议，推动决策方迅速行动。',
+    title: '推演者',
+    description: '预测情绪变化、立场分化、传播路径与引爆点，提前看见后续走势。',
     icon: ShieldCheck,
-    accent: '形成行动',
+    accent: '预见扩散',
+  },
+  {
+    title: '响应者',
+    description: '基于研判结果生成公关响应、澄清稿、FAQ 与多平台表达方案。',
+    icon: Layers3,
+    accent: '组织发声',
   },
 ];
 
@@ -488,36 +500,49 @@ export default function HomePage() {
 
         <div className="space-y-6">
           <PageSection
-            title="这次重构后的首页角色"
-            description="首页既是输入入口，也是角色联动的起点——输入→判断→行动三位角色共同驱动 TruthCast 的闭环。"
+            title="五大智能体角色"
+            description="TruthCast 不是单点工具，而是一套由五个智能体协同驱动的事实核查与传播响应系统。它从输入信号出发，完成侦测、考据、裁决、推演与响应的闭环。"
           >
-            <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+            <div className="space-y-4">
               <div className="rounded-[1.5rem] bg-[linear-gradient(160deg,rgba(255,255,255,0.95),rgba(244,249,252,0.92))] p-6 shadow-[0_18px_36px_rgba(24,53,76,0.18)]">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--muted-strong)]">
-                  首页新角色
-                </div>
-                <div className="mt-2 text-xl font-semibold text-foreground">
-                  一个输入驱动的团队故事
-                </div>
-                {/* <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                  TruthCast 的首页不再是冷冰冰的表单，而是化身为“调研者 → 判断者 → 行动者”三位角色，围绕同一个任务：从输入出发，把风险、证据与行动建议串联起来。
-                </p> */}
-                <div className="mt-4 space-y-2 text-sm text-foreground/90">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-primary" />
-                    <span className="font-medium text-foreground">输入驱动，结论面向决策</span>
+                <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-start">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--muted-strong)]">
+                      智能体编队
+                    </div>
+                    <div className="mt-2 text-xl font-semibold text-foreground">
+                      从输入信号到行动输出的协同链
+                    </div>
+                    <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                      当一条信息进入系统，真正启动的不是单一模型，而是一支协同工作的智能体编队。侦测者负责发现异常，考据者负责追索依据，裁决者负责形成判断，推演者负责预见传播，响应者负责组织对外表达。
+                    </p>
+                    <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                      它们共同把“看到一条消息”推进为“完成一次研判”，把事实核查、传播推演与公关响应连成一条可执行链路。
+                    </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Layers3 className="h-4 w-4 text-primary" />
-                    <span className="font-medium text-foreground">多模态信息统一接入</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Radar className="h-4 w-4 text-primary" />
-                    <span className="font-medium text-foreground">行动建议可追溯、可导出</span>
+                  <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
+                    <div className="rounded-[1.2rem] border border-white/70 bg-white/72 px-4 py-4 shadow-[0_10px_24px_rgba(26,54,78,0.06)]">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-primary" />
+                        <span className="text-sm font-medium text-foreground">异常先被发现</span>
+                      </div>
+                    </div>
+                    <div className="rounded-[1.2rem] border border-white/70 bg-white/72 px-4 py-4 shadow-[0_10px_24px_rgba(26,54,78,0.06)]">
+                      <div className="flex items-center gap-2">
+                        <Layers3 className="h-4 w-4 text-primary" />
+                        <span className="text-sm font-medium text-foreground">证据、结论与传播走势被统一串联</span>
+                      </div>
+                    </div>
+                    <div className="rounded-[1.2rem] border border-white/70 bg-white/72 px-4 py-4 shadow-[0_10px_24px_rgba(26,54,78,0.06)]">
+                      <div className="flex items-center gap-2">
+                        <Radar className="h-4 w-4 text-primary" />
+                        <span className="text-sm font-medium text-foreground">最终输出直达公关响应与行动执行</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
-              <div className="grid gap-4">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                 {roleStories.map((role) => (
                   <div
                     key={role.title}
@@ -528,7 +553,7 @@ export default function HomePage() {
                         <role.icon className="h-4 w-4 text-primary" />
                         {role.accent}
                       </div>
-                      <div className="text-xs text-muted-foreground">首页角色</div>
+                      <div className="text-xs text-muted-foreground">智能体角色</div>
                     </div>
                     <div className="mt-3 text-base font-medium text-foreground">{role.title}</div>
                     <p className="mt-2 text-sm leading-6 text-muted-foreground">{role.description}</p>
