@@ -16,6 +16,7 @@ export default function ResultPage() {
     text,
     detectData,
     images,
+    urlComments,
     fusionReport,
     claims,
     rawEvidences,
@@ -208,6 +209,33 @@ export default function ResultPage() {
                 </div>
               </div>
             )}
+
+            {/* {urlComments.length > 0 && (
+              <div className="mt-5 space-y-3 border-t border-border/60 pt-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-medium text-foreground">评论抓取</h3>
+                  <span className="rounded-full border border-white/60 bg-white/76 px-2.5 py-1 text-xs text-muted-foreground">
+                    共抓取 {urlComments.length} 条
+                  </span>
+                </div>
+                <div className="space-y-3">
+                  {urlComments.map((comment, index) => (
+                    <div
+                      key={`${comment.username}-${comment.publish_time}-${index}`}
+                      className="rounded-[1.1rem] border border-white/60 bg-[color:var(--panel-soft)]/68 px-4 py-3"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">{comment.username || '匿名用户'}</span>
+                        <span>{comment.publish_time || '时间未知'}</span>
+                      </div>
+                      <div className="mt-2 whitespace-pre-wrap break-words text-sm text-muted-foreground">
+                        {comment.content}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )} */}
           </div>
           <ErrorBoundary title="风险概览加载失败">
             <RiskOverview data={detectData} isLoading={phases.detect === 'running'} />

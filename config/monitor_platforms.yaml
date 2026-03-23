@@ -19,7 +19,7 @@ platforms:
   - key: cankaoxiaoxi
     display_name: 参考消息
     newsnow_id: cankaoxiaoxi
-    enabled: false
+    enabled: true
 
   - key: wallstreetcn-hot
     display_name: 华尔街见闻最热
@@ -39,7 +39,7 @@ platforms:
   - key: zaobao
     display_name: 联合早报
     newsnow_id: zaobao
-    enabled: true
+    enabled: false
 
   - key: cls-hot
     display_name: 财联社热门

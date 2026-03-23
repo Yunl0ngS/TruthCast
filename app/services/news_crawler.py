@@ -1,47 +1,25 @@
 import os
-import re
-import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any
 
 import httpx
+
 from app.core.logger import get_logger
-from app.services.json_utils import safe_json_loads
+from app.services.url_extraction.extractors import (
+    ContentCandidate,
+    extract_with_readability,
+    extract_with_trafilatura,
+)
+from app.services.url_extraction.llm_postprocess import (
+    postprocess_extracted_content,
+    rescue_extracted_candidates,
+)
+from app.services.url_extraction.metadata import extract_metadata
+from app.services.url_extraction.publishers import try_extract_publisher_article
+from app.services.url_extraction.publishers.ckxxapp import PublisherComment
+from app.services.url_extraction.rendered import render_page
+from app.services.url_extraction.ranker import rank_candidates
 
 logger = get_logger("truthcast.news_crawler")
-
-
-def _as_float(value: str | None, fallback: float, minimum: float = 0.0) -> float:
-    try:
-        return max(minimum, float(value or fallback))
-    except (TypeError, ValueError):
-        return fallback
-
-
-def _crawler_http_timeout(timeout_sec: float) -> httpx.Timeout:
-    return httpx.Timeout(timeout_sec)
-
-
-def _crawler_llm_timeout() -> httpx.Timeout:
-    total_timeout = _as_float(os.getenv("TRUTHCAST_CRAWLER_LLM_TIMEOUT_SEC"), 45.0, minimum=1.0)
-    read_timeout = _as_float(
-        os.getenv("TRUTHCAST_CRAWLER_LLM_READ_TIMEOUT_SEC"),
-        total_timeout,
-        minimum=1.0,
-    )
-    return httpx.Timeout(total_timeout, connect=total_timeout, read=read_timeout, write=total_timeout)
-
-
-def _crawler_llm_max_retries() -> int:
-    try:
-        return max(1, int(os.getenv("TRUTHCAST_CRAWLER_LLM_MAX_RETRIES", "2")))
-    except (TypeError, ValueError):
-        return 2
-
-
-def _crawler_llm_retry_delay_sec() -> float:
-    return _as_float(os.getenv("TRUTHCAST_CRAWLER_LLM_RETRY_DELAY_SEC"), 1.0, minimum=0.0)
 
 
 @dataclass
@@ -50,8 +28,68 @@ class CrawledNews:
     content: str
     publish_date: str
     source_url: str
+    comments: list[PublisherComment] | None = None
     success: bool = True
     error_msg: str = ""
+
+
+def fetch_page(url: str, timeout_sec: float = 15.0) -> tuple[str, str]:
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+    }
+    with httpx.Client(timeout=httpx.Timeout(timeout_sec), follow_redirects=True, headers=headers) as client:
+        response = client.get(url)
+        response.raise_for_status()
+        final_url = str(response.url)
+        html = response.text
+    logger.info(
+        "新闻抓取：HTTP获取成功 url=%s final_url=%s status=%s html_len=%s",
+        url,
+        final_url,
+        getattr(response, "status_code", "unknown"),
+        len(html),
+    )
+    return final_url, html
+
+
+def _collect_candidates(html: str) -> list[ContentCandidate]:
+    candidates: list[ContentCandidate] = []
+    for extractor in (extract_with_readability, extract_with_trafilatura):
+        candidate = extractor(html)
+        if candidate is None:
+            continue
+        logger.info(
+            "新闻抓取：候选摘要 extractor=%s title=%s text_len=%s paragraphs=%s link_density=%.3f noise_hits=%s",
+            candidate.extractor_name,
+            candidate.title[:80],
+            candidate.text_len,
+            candidate.paragraph_count,
+            candidate.link_density,
+            len(candidate.noise_hits),
+        )
+        candidates.append(candidate)
+    return candidates
+
+
+def _render_fallback_enabled() -> bool:
+    return (os.getenv("TRUTHCAST_URL_EXTRACT_RENDER_FALLBACK", "true") or "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _llm_enhance_enabled() -> bool:
+    return (os.getenv("TRUTHCAST_URL_EXTRACT_LLM_ENABLED", "false") or "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def crawl_news_url(url: str, timeout_sec: float = 15.0) -> CrawledNews:
@@ -60,11 +98,10 @@ def crawl_news_url(url: str, timeout_sec: float = 15.0) -> CrawledNews:
     """
     try:
         logger.info("新闻抓取：开始抓取新闻链接 url=%s", url)
-        # SSRF 防护：验证 URL 不指向内部/私有地址
         from app.core.security import SSRFBlockedError, validate_url_for_ssrf
 
         try:
-            url = validate_url_for_ssrf(url)
+            validated_url = validate_url_for_ssrf(url)
         except SSRFBlockedError as exc:
             logger.warning("SSRF 拦截: url=%s, reason=%s", url, exc)
             return CrawledNews(
@@ -76,33 +113,192 @@ def crawl_news_url(url: str, timeout_sec: float = 15.0) -> CrawledNews:
                 error_msg=f"URL 安全检查未通过：{exc}",
             )
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        with httpx.Client(
-            timeout=_crawler_http_timeout(timeout_sec), follow_redirects=True, headers=headers
-        ) as client:
-            resp = client.get(url)
-            resp.raise_for_status()
-            html = resp.text
+        final_url, html = fetch_page(validated_url, timeout_sec=timeout_sec)
         logger.info(
-            "新闻抓取：HTTP获取成功 url=%s status=%s html_len=%s",
-            url,
-            getattr(resp, "status_code", "unknown"),
+            "新闻抓取：HTTP获取成功 url=%s final_url=%s html_len=%s",
+            validated_url,
+            final_url,
             len(html),
         )
-
-        # 1. 简单清洗 HTML 减少 token 消耗
-        cleaned_html = _preprocess_html(html)
+        publisher_article = try_extract_publisher_article(final_url, html)
+        if publisher_article is not None:
+            logger.info(
+                "新闻抓取：命中站点特化解析 url=%s title=%s content_len=%s publish_date=%s",
+                final_url,
+                publisher_article.title[:80],
+                len(publisher_article.content),
+                publisher_article.publish_date or "",
+            )
+            return CrawledNews(
+                title=publisher_article.title,
+                content=publisher_article.content,
+                publish_date=publisher_article.publish_date,
+                source_url=publisher_article.source_url,
+                comments=publisher_article.comments,
+                success=True,
+            )
+        metadata = extract_metadata(html, final_url)
         logger.info(
-            "新闻抓取：HTML预处理完成 url=%s cleaned_len=%s",
-            url,
-            len(cleaned_html),
+            "新闻抓取：metadata提取完成 url=%s title=%s publish_date=%s canonical=%s",
+            validated_url,
+            metadata.title[:80],
+            metadata.publish_date or "",
+            metadata.canonical_url or final_url,
         )
 
-        # 2. 调用 LLM 进行结构化提取
-        return _extract_news_with_llm(url, cleaned_html)
+        candidates = _collect_candidates(html)
+        rescue_candidates: list[ContentCandidate] = list(candidates)
+        ranked = rank_candidates(candidates, title_hint=metadata.title)
+        logger.info(
+            "新闻抓取：候选正文打分完成 url=%s candidate_count=%s confidence=%s score=%.3f fallback_needed=%s",
+            validated_url,
+            len(candidates),
+            ranked.confidence,
+            ranked.score,
+            ranked.fallback_needed,
+        )
 
+        if ranked.best is None and ranked.fallback_needed and _render_fallback_enabled():
+            logger.info("新闻抓取：触发渲染fallback url=%s reasons=%s", validated_url, "；".join(ranked.reasons))
+            rendered = render_page(metadata.canonical_url or final_url)
+            if rendered.success:
+                logger.info(
+                    "新闻抓取：渲染fallback完成 url=%s final_url=%s html_len=%s",
+                    validated_url,
+                    rendered.final_url,
+                    len(rendered.html),
+                )
+                rendered_metadata = extract_metadata(rendered.html, rendered.final_url)
+                rendered_candidates = _collect_candidates(rendered.html)
+                rescue_candidates.extend(rendered_candidates)
+                rendered_ranked = rank_candidates(rendered_candidates, title_hint=rendered_metadata.title)
+                logger.info(
+                    "新闻抓取：渲染fallback打分完成 url=%s candidate_count=%s confidence=%s score=%.3f fallback_needed=%s",
+                    validated_url,
+                    len(rendered_candidates),
+                    rendered_ranked.confidence,
+                    rendered_ranked.score,
+                    rendered_ranked.fallback_needed,
+                )
+                if rendered_ranked.best is not None:
+                    best = rendered_ranked.best
+                    title = rendered_metadata.title or best.title
+                    if _llm_enhance_enabled():
+                        logger.info("新闻抓取：LLM后处理开始 url=%s source=rendered_fallback", validated_url)
+                        enhanced = postprocess_extracted_content(
+                            title=title,
+                            content=best.content,
+                            publish_date=rendered_metadata.publish_date,
+                            source_url=rendered_metadata.canonical_url or rendered.final_url,
+                        )
+                        if enhanced is not None and enhanced.content:
+                            logger.info("新闻抓取：LLM后处理成功 url=%s", validated_url)
+                            title = enhanced.title or title
+                            best = ContentCandidate(
+                                extractor_name=best.extractor_name,
+                                title=title,
+                                content=enhanced.content,
+                                text_len=len(enhanced.content),
+                                paragraph_count=best.paragraph_count,
+                                link_density=best.link_density,
+                                chinese_ratio=best.chinese_ratio,
+                                noise_hits=best.noise_hits,
+                                raw_score=best.raw_score,
+                            )
+                            publish_date = enhanced.publish_date or rendered_metadata.publish_date
+                        else:
+                            logger.info("新闻抓取：LLM后处理未生效 url=%s", validated_url)
+                            publish_date = rendered_metadata.publish_date
+                    else:
+                        publish_date = rendered_metadata.publish_date
+                    return CrawledNews(
+                        title=title,
+                        content=best.content,
+                        publish_date=publish_date,
+                        source_url=rendered_metadata.canonical_url or rendered.final_url,
+                        success=True,
+                    )
+            else:
+                logger.warning(
+                    "新闻抓取：渲染fallback失败 url=%s error=%s",
+                    validated_url,
+                    rendered.error_msg,
+                )
+
+        if ranked.best is None and _llm_enhance_enabled():
+            logger.info("新闻抓取：LLM兜底救援开始 url=%s candidate_count=%s", validated_url, len(rescue_candidates))
+            rescued = rescue_extracted_candidates(
+                title=metadata.title,
+                publish_date=metadata.publish_date,
+                source_url=metadata.canonical_url or final_url,
+                candidates=rescue_candidates,
+            )
+            if rescued is not None and rescued.content:
+                logger.info("新闻抓取：LLM兜底救援成功 url=%s", validated_url)
+                return CrawledNews(
+                    title=rescued.title or metadata.title,
+                    content=rescued.content,
+                    publish_date=rescued.publish_date or metadata.publish_date,
+                    source_url=metadata.canonical_url or final_url,
+                    success=True,
+                )
+            logger.info("新闻抓取：LLM兜底救援未生效 url=%s", validated_url)
+
+        if ranked.best is None:
+            message = "；".join(ranked.reasons) if ranked.reasons else "无可用候选"
+            logger.warning("新闻抓取：未找到可用正文 url=%s reasons=%s", validated_url, message)
+            return CrawledNews(
+                title=metadata.title,
+                content="[提取失败]",
+                publish_date=metadata.publish_date,
+                source_url=metadata.canonical_url or final_url,
+                success=False,
+                error_msg=message,
+            )
+
+        best = ranked.best
+        title = metadata.title or best.title
+        publish_date = metadata.publish_date
+        if _llm_enhance_enabled():
+            logger.info("新闻抓取：LLM后处理开始 url=%s source=primary", validated_url)
+            enhanced = postprocess_extracted_content(
+                title=title,
+                content=best.content,
+                publish_date=metadata.publish_date,
+                source_url=metadata.canonical_url or final_url,
+            )
+            if enhanced is not None and enhanced.content:
+                logger.info("新闻抓取：LLM后处理成功 url=%s", validated_url)
+                title = enhanced.title or title
+                best = ContentCandidate(
+                    extractor_name=best.extractor_name,
+                    title=title,
+                    content=enhanced.content,
+                    text_len=len(enhanced.content),
+                    paragraph_count=best.paragraph_count,
+                    link_density=best.link_density,
+                    chinese_ratio=best.chinese_ratio,
+                    noise_hits=best.noise_hits,
+                    raw_score=best.raw_score,
+                )
+                publish_date = enhanced.publish_date or metadata.publish_date
+            else:
+                logger.info("新闻抓取：LLM后处理未生效 url=%s", validated_url)
+        logger.info(
+            "新闻抓取：最终正文选型完成 url=%s extractor=%s title=%s content_len=%s publish_date=%s",
+            validated_url,
+            best.extractor_name,
+            title[:80],
+            len(best.content),
+            publish_date or "",
+        )
+        return CrawledNews(
+            title=title,
+            content=best.content,
+            publish_date=publish_date,
+            source_url=metadata.canonical_url or final_url,
+            success=True,
+        )
     except Exception as exc:
         logger.error("抓取 URL 失败: url=%s, error=%s", url, exc)
         return CrawledNews(
@@ -112,144 +308,4 @@ def crawl_news_url(url: str, timeout_sec: float = 15.0) -> CrawledNews:
             source_url=url,
             success=False,
             error_msg=str(exc),
-        )
-
-
-def _preprocess_html(html: str) -> str:
-    """
-    移除脚本、样式、注释等，只保留主体内容块
-    """
-    # 移除 script, style, head, nav, footer, iframe
-    html = re.sub(
-        r"<(script|style|head|nav|footer|iframe)[^>]*>.*?</\1>",
-        "",
-        html,
-        flags=re.DOTALL | re.IGNORECASE,
-    )
-    # 移除注释
-    html = re.sub(r"<!--.*?-->", "", html, flags=re.DOTALL)
-    # 移除多余空白
-    html = re.sub(r"\s+", " ", html).strip()
-    # 截断太长的内容，避免正文提取阶段输入过大导致超时
-    return html[:10000]
-
-
-def _extract_news_with_llm(url: str, html: str) -> CrawledNews:
-    """
-    利用 LLM 从清洗后的 HTML 中提取新闻要素
-    """
-    api_key = os.getenv("TRUTHCAST_LLM_API_KEY", "").strip()
-    if not api_key:
-        logger.warning("Crawler: TRUTHCAST_LLM_API_KEY 为空，跳过 LLM 提取")
-        return CrawledNews(
-            title="",
-            content="[未配置 API Key]",
-            publish_date="",
-            source_url=url,
-            success=False,
-        )
-
-    base_url = os.getenv("TRUTHCAST_LLM_BASE_URL", "https://api.openai.com/v1").rstrip(
-        "/"
-    )
-    model = os.getenv("TRUTHCAST_CRAWLER_LLM_MODEL") or os.getenv(
-        "TRUTHCAST_LLM_MODEL", "gpt-4o-mini"
-    )
-
-    system_prompt = """你是一个专业的新闻内容提取助手。你的任务是从给定的 HTML 源码片段中准确提取新闻的核心信息。
-请输出合法的 JSON 格式，包含以下字段：
-- title: 新闻标题
-- content: 新闻正文内容（保持段落完整，移除广告、推荐阅读等干扰信息）
-- publish_date: 发布日期（格式：YYYY-MM-DD，如果无法确定则留空）
-
-注意：如果 HTML 中包含多篇新闻或无关信息，请只提取最主要的那篇新闻。
-"""
-    user_prompt = f"URL: {url}\n\nHTML Snippet:\n{html}"
-
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "response_format": {"type": "json_object"},
-        "temperature": 0.1,
-    }
-
-    try:
-        logger.info("新闻抓取：开始LLM提取 url=%s html_len=%s model=%s", url, len(html), model)
-        max_retries = _crawler_llm_max_retries()
-        retry_delay_sec = _crawler_llm_retry_delay_sec()
-        timeout = _crawler_llm_timeout()
-        raw_content = None
-        for attempt in range(1, max_retries + 1):
-            try:
-                with httpx.Client(timeout=timeout) as client:
-                    resp = client.post(
-                        f"{base_url}/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {api_key}",
-                            "Content-Type": "application/json",
-                        },
-                        json=payload,
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
-                    raw_content = data["choices"][0]["message"]["content"]
-                break
-            except httpx.ReadTimeout as exc:
-                logger.warning(
-                    "新闻抓取：LLM提取读取超时 url=%s attempt=%s/%s read_timeout=%ss",
-                    url,
-                    attempt,
-                    max_retries,
-                    timeout.read,
-                )
-                if attempt >= max_retries:
-                    raise
-                if retry_delay_sec > 0:
-                    time.sleep(retry_delay_sec)
-            except httpx.TimeoutException:
-                logger.warning(
-                    "新闻抓取：LLM提取请求超时 url=%s attempt=%s/%s timeout=%ss",
-                    url,
-                    attempt,
-                    max_retries,
-                    timeout.connect,
-                )
-                if attempt >= max_retries:
-                    raise
-                if retry_delay_sec > 0:
-                    time.sleep(retry_delay_sec)
-        if raw_content is None:
-            raise RuntimeError("LLM extraction returned empty content")
-
-        res_data = safe_json_loads(raw_content)
-        title = str(res_data.get("title", "")).strip()
-        content = str(res_data.get("content", "")).strip()
-        publish_date = str(res_data.get("publish_date", "")).strip()
-        logger.info(
-            "新闻抓取：提取成功 url=%s title=%s content_len=%s publish_date=%s",
-            url,
-            title[:80],
-            len(content),
-            publish_date or "",
-        )
-
-        return CrawledNews(
-            title=title,
-            content=content,
-            publish_date=publish_date,
-            source_url=url,
-            success=True,
-        )
-    except Exception as exc:
-        logger.error("LLM 提取新闻内容失败: %s", exc)
-        return CrawledNews(
-            title="",
-            content="[提取失败]",
-            publish_date="",
-            source_url=url,
-            success=False,
-            error_msg=f"LLM extraction failed: {exc}",
         )

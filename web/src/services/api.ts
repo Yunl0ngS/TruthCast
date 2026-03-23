@@ -26,6 +26,7 @@ import type {
   ReportResponse,
   SimulateResponse,
   StrategyConfig,
+  UrlCrawlResponse,
   UrlDetectResponse,
 } from '@/types';
 
@@ -248,6 +249,19 @@ export async function analyzeMultimodalImagesWithSignal(
 
 export async function detectUrl(url: string, signal?: AbortSignal): Promise<UrlDetectResponse> {
   const { data } = await api.post<UrlDetectResponse>('/detect/url', { url }, { signal });
+  return data;
+}
+
+export async function crawlNewsUrl(url: string, signal?: AbortSignal): Promise<UrlCrawlResponse> {
+  const { data } = await api.post<UrlCrawlResponse>('/detect/url/crawl', { url }, { signal });
+  return data;
+}
+
+export async function detectUrlRisk(
+  payload: { url: string; title: string; content: string },
+  signal?: AbortSignal
+): Promise<DetectResponse> {
+  const { data } = await api.post<DetectResponse>('/detect/url/risk', payload, { signal });
   return data;
 }
 

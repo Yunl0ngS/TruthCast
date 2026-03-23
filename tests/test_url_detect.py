@@ -1,5 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
+from unittest.mock import MagicMock, patch
+
 from app.main import app
 
 client = TestClient(app)
@@ -24,3 +26,34 @@ def test_url_detect_failure():
     data = response.json()
     assert data["success"] is False
     assert "error_msg" in data
+
+
+def test_url_crawl_schema():
+    """验证 /detect/url/crawl 接口存在且返回抓取响应结构"""
+    response = client.post("/detect/url/crawl", json={"url": "https://example.com/news/123"})
+    assert response.status_code == 200
+    data = response.json()
+    assert "success" in data
+    assert "url" in data
+    assert data["url"] == "https://example.com/news/123"
+
+
+@patch("app.api.routes_detect.detect_risk_snapshot")
+def test_url_risk_schema_validation(mock_risk):
+    """验证 /detect/url/risk 接口存在且返回风险快照结构"""
+    mock_risk.return_value = MagicMock(
+        label="needs_review",
+        confidence=0.7,
+        score=60,
+        reasons=["test"],
+        strategy=None,
+    )
+
+    response = client.post(
+        "/detect/url/risk",
+        json={"url": "https://example.com/news/123", "title": "标题", "content": "正文"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["label"] == "needs_review"
+    assert data["score"] == 60

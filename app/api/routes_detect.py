@@ -1,4 +1,5 @@
 import os
+from dataclasses import asdict, is_dataclass
 
 from fastapi import APIRouter
 
@@ -18,8 +19,11 @@ from app.schemas.detect import (
     ReportRequest,
     ReportResponse,
     StrategyConfig,
+    UrlCommentItem,
+    UrlCrawlResponse,
     UrlDetectRequest,
     UrlDetectResponse,
+    UrlRiskDetectRequest,
 )
 from app.services.history_store import save_report
 from app.services.multimodal.fusion import build_report_multimodal_payload
@@ -39,6 +43,20 @@ try:
     )
 except (ValueError, TypeError):
     _MAX_INPUT_CHARS = _DEFAULT_MAX_CHARS
+
+
+def _normalize_url_comments(comments: object) -> list[UrlCommentItem]:
+    normalized: list[UrlCommentItem] = []
+    if not isinstance(comments, list):
+        return normalized
+    for item in comments:
+        if isinstance(item, UrlCommentItem):
+            normalized.append(item)
+        elif is_dataclass(item):
+            normalized.append(UrlCommentItem(**asdict(item)))
+        elif isinstance(item, dict):
+            normalized.append(UrlCommentItem(**item))
+    return normalized
 
 
 def _truncate_text(text: str) -> tuple[str, bool]:
@@ -175,7 +193,33 @@ def detect_report(payload: ReportRequest) -> dict:
 
 @router.post("/url", response_model=UrlDetectResponse)
 def detect_url(payload: UrlDetectRequest) -> UrlDetectResponse:
-    """抓取新闻 URL 并进行初始风险评估"""
+    """抓取新闻 URL 并进行初始风险评估（兼容旧接口）"""
+    logger.info("链接核查：收到 URL 抓取请求 url=%s", payload.url)
+    crawl_resp = crawl_url(payload)
+    if not crawl_resp.success:
+        return UrlDetectResponse(**crawl_resp.model_dump(), risk=None)
+    risk_resp = detect_url_risk(
+        UrlRiskDetectRequest(
+            url=crawl_resp.url,
+            title=crawl_resp.title,
+            content=crawl_resp.content,
+        )
+    )
+
+    return UrlDetectResponse(
+        url=crawl_resp.url,
+        title=crawl_resp.title,
+        content=crawl_resp.content,
+        publish_date=crawl_resp.publish_date,
+        comments=_normalize_url_comments(crawl_resp.comments),
+        risk=risk_resp,
+        success=True,
+    )
+
+
+@router.post("/url/crawl", response_model=UrlCrawlResponse)
+def crawl_url(payload: UrlDetectRequest) -> UrlCrawlResponse:
+    """仅抓取新闻 URL，不等待风险快照。"""
     logger.info("链接核查：收到 URL 抓取请求 url=%s", payload.url)
     crawled = crawl_news_url(payload.url)
     if not crawled.success:
@@ -184,18 +228,16 @@ def detect_url(payload: UrlDetectRequest) -> UrlDetectResponse:
             payload.url,
             crawled.error_msg,
         )
-        return UrlDetectResponse(
+        return UrlCrawlResponse(
             url=payload.url,
             title="",
             content="",
             publish_date="",
+            comments=[],
             success=False,
             error_msg=crawled.error_msg,
         )
 
-    # 获取风险快照：链接核查支路统一使用“标题 + 正文”并开启新闻门控，
-    # 以保证与后续新闻分析链路的判定口径一致。
-    merged_text = f"{crawled.title}\n\n{crawled.content}".strip()
     logger.info(
         "链接核查：抓取成功 url=%s title=%s content_len=%s publish_date=%s",
         payload.url,
@@ -203,6 +245,20 @@ def detect_url(payload: UrlDetectRequest) -> UrlDetectResponse:
         len(crawled.content or ""),
         crawled.publish_date or "",
     )
+    return UrlCrawlResponse(
+        url=payload.url,
+        title=crawled.title,
+        content=crawled.content,
+        publish_date=crawled.publish_date,
+        comments=_normalize_url_comments(crawled.comments or []),
+        success=True,
+    )
+
+
+@router.post("/url/risk", response_model=DetectResponse)
+def detect_url_risk(payload: UrlRiskDetectRequest) -> DetectResponse:
+    """对已抓取的新闻文本执行风险快照。"""
+    merged_text = f"{payload.title}\n\n{payload.content}".strip()
     with llm_slot():
         risk_result = detect_risk_snapshot(merged_text, enable_news_gate=True)
     logger.info(
@@ -212,21 +268,11 @@ def detect_url(payload: UrlDetectRequest) -> UrlDetectResponse:
         risk_result.label,
         len(risk_result.reasons or []),
     )
-
-    risk_resp = DetectResponse(
+    return DetectResponse(
         label=risk_result.label,
         confidence=risk_result.confidence,
         score=risk_result.score,
         reasons=risk_result.reasons,
         strategy=risk_result.strategy,
         truncated=False,
-    )
-
-    return UrlDetectResponse(
-        url=payload.url,
-        title=crawled.title,
-        content=crawled.content,
-        publish_date=crawled.publish_date,
-        risk=risk_resp,
-        success=True,
     )
