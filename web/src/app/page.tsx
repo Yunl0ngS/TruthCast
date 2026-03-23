@@ -238,7 +238,7 @@ export default function HomePage() {
         }
       />
 
-      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+      <div className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
         <Card className="overflow-hidden border-white/70 bg-[linear-gradient(160deg,rgba(255,255,255,0.84),rgba(244,249,252,0.82))]">
           <CardHeader className="border-b border-border/60 pb-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -505,7 +505,7 @@ export default function HomePage() {
           >
             <div className="space-y-4">
               <div className="rounded-[1.5rem] bg-[linear-gradient(160deg,rgba(255,255,255,0.95),rgba(244,249,252,0.92))] p-6 shadow-[0_18px_36px_rgba(24,53,76,0.18)]">
-                <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-start">
+                <div className="flex flex-col gap-6">
                   <div>
                     <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--muted-strong)]">
                       智能体编队
@@ -520,7 +520,7 @@ export default function HomePage() {
                       它们共同把“看到一条消息”推进为“完成一次研判”，把事实核查、传播推演与公关响应连成一条可执行链路。
                     </p>
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
+                  <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
                     <div className="rounded-[1.2rem] border border-white/70 bg-white/72 px-4 py-4 shadow-[0_10px_24px_rgba(26,54,78,0.06)]">
                       <div className="flex items-center gap-2">
                         <Sparkles className="h-4 w-4 text-primary" />
@@ -542,21 +542,25 @@ export default function HomePage() {
                   </div>
                 </div>
               </div>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                {roleStories.map((role) => (
+              <div className="group flex flex-col xl:flex-row w-full h-auto xl:h-[11.5rem] py-2 mt-2">
+                {roleStories.map((role, idx) => (
                   <div
                     key={role.title}
-                    className="rounded-[1.35rem] border border-white/65 bg-white/76 p-5 shadow-[0_10px_24px_rgba(26,54,78,0.08)]"
+                    className="relative flex-1 group/card min-w-[5rem] rounded-[1.25rem] border border-white/70 bg-gradient-to-br from-white/95 to-white/75 backdrop-blur-xl p-4 xl:p-4 shadow-[4px_4px_24px_rgba(26,54,78,0.05)] transition-all duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)] hover:flex-[4] hover:bg-white hover:!z-[60] hover:shadow-[0_20px_40px_rgba(26,54,78,0.12)] hover:-translate-y-2 xl:-ml-6 first:ml-0 overflow-hidden"
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-[13px] font-semibold uppercase tracking-[0.16em] text-[color:var(--muted-strong)]">
-                        <role.icon className="h-4 w-4 text-primary" />
-                        {role.accent}
+                    <div className="flex items-center justify-between opacity-90 transition-opacity duration-300 group-hover/card:opacity-100">
+                      <div className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-[0.1em] text-[color:var(--muted-strong)] whitespace-nowrap">
+                        <role.icon className="h-3.5 w-3.5 shrink-0 text-primary transition-transform duration-500 group-hover/card:scale-110" />
+                        <span className="truncate">{role.accent}</span>
                       </div>
-                      <div className="text-xs text-muted-foreground">智能体角色</div>
+                      <div className="text-[10px] text-muted-foreground hidden sm:block shrink-0 ml-2">智能体角色</div>
                     </div>
-                    <div className="mt-3 text-base font-medium text-foreground">{role.title}</div>
-                    <p className="mt-2 text-sm leading-6 text-muted-foreground">{role.description}</p>
+                    <div className="mt-3 xl:mt-3 text-[14px] font-semibold text-foreground transition-colors duration-300 group-hover/card:text-primary whitespace-nowrap">
+                      {role.title}
+                    </div>
+                    <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground line-clamp-3 group-hover/card:line-clamp-none min-w-[12rem] xl:min-w-0">
+                      {role.description}
+                    </p>
                   </div>
                 ))}
               </div>
