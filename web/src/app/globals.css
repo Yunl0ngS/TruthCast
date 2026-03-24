@@ -163,17 +163,25 @@
     letter-spacing: -0.03em;
   }
 
-  [data-panel='strong'] {
-    background: linear-gradient(160deg, color-mix(in oklab, var(--panel-strong) 92%, white), color-mix(in oklab, var(--panel-strong) 78%, black 10%));
+  [data-panel="strong"] {
+    background: linear-gradient(
+      160deg,
+      color-mix(in oklab, var(--panel-strong) 92%, white),
+      color-mix(in oklab, var(--panel-strong) 78%, black 10%)
+    );
     color: var(--panel-strong-foreground);
   }
 
-  [data-panel='soft'] {
+  [data-panel="soft"] {
     background: color-mix(in oklab, var(--panel-soft) 82%, white);
   }
 
-  [data-surface='glass'] {
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.8), rgba(246, 249, 252, 0.62));
+  [data-surface="glass"] {
+    background: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.8),
+      rgba(246, 249, 252, 0.62)
+    );
     backdrop-filter: blur(16px);
   }
 
