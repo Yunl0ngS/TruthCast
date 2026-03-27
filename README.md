@@ -36,6 +36,10 @@
 
 - Web 控制台: [http://38.226.195.121:3000/](http://38.226.195.121:3000/)
 
+## 🎥 视频演示
+
+- Bilibili: [https://www.bilibili.com/video/BV113XKB9ETT](https://www.bilibili.com/video/BV113XKB9ETT)
+
 ## 🖼️ 界面截图
 
 ### 实时监测页（多来源平台+实时刷新）
