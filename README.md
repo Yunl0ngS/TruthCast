@@ -34,9 +34,13 @@
 
 ## 🌐 在线体验
 
-  - Web 控制台: [http://38.226.195.121:3000/](http://38.226.195.121:3000/)
+- Web 控制台: [http://38.226.195.121:3000/](http://38.226.195.121:3000/)
 
 ## 🖼️ 界面截图
+
+### 实时监测页（多来源平台+实时刷新）
+
+![实时监测页](docs/images/Monitor.png)
 
 ### 输入页
 
@@ -142,8 +146,8 @@ cp .env.example .env
 docker-compose up -d
 ```
 
-* 访问前端控制台: `http://localhost:3000`
-* 访问后端 API 文档: `http://localhost:8000/docs`
+- 访问前端控制台: `http://localhost:3000`
+- 访问后端 API 文档: `http://localhost:8000/docs`
 
 部署前建议优先检查以下安全相关环境变量：
 
@@ -707,15 +711,20 @@ pip install -e .
 你可以使用 `truthcast` 命令调用各种功能：
 
 - **全链路分析**:
+
   ```bash
   truthcast analyze
   # 然后粘贴待分析文本，Ctrl+D 结束输入（推荐，避免被当作文件路径）
   ```
+
 - **交互式对话 (REPL)**:
+
   ```bash
   truthcast chat
   ```
+
 - **查看历史**:
+
   ```bash
   truthcast history list
   ```
@@ -770,9 +779,11 @@ truthcast --local-agent chat
 ### 6. Windows GBK 终端注意事项
 
 - 推荐在 Windows 终端执行：
+
   ```bat
   chcp 936
   ```
+
 - TruthCast CLI 已做 GBK/cp936 编码降级处理；若 emoji 无法显示，会自动回退为 ASCII 标签（如 `[ERROR]`）
 - `truthcast analyze` 建议走 stdin 输入（见上文），避免把中文参数误判为文件路径
 
