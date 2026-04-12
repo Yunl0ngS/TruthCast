@@ -41,3 +41,30 @@ def test_web_retrieval_baidu_parse(monkeypatch) -> None:
     assert isinstance(rows[0], WebEvidenceCandidate)
     assert rows[0].source == "news.cctv.com"
     assert rows[0].is_authoritative is False
+
+
+def test_web_retrieval_ddgs_provider_dispatch(monkeypatch) -> None:
+    monkeypatch.setenv("TRUTHCAST_WEB_RETRIEVAL_ENABLED", "true")
+    monkeypatch.setenv("TRUTHCAST_WEB_SEARCH_PROVIDER", "ddgs")
+    monkeypatch.setenv("TRUTHCAST_WEB_ALLOWED_DOMAINS", "news.cctv.com")
+
+    def fake_search_ddgs(claim_text: str, top_k: int, timeout_sec: float):
+        _ = claim_text, top_k, timeout_sec
+        return [
+            {
+                "title": "央视新闻：辟谣通报",
+                "url": "https://news.cctv.com/2026/04/12/abc.shtml",
+                "summary": "官方辟谣并说明时间线。",
+                "score": 0.62,
+                "published_at": "2026-04-12",
+                "raw_snippet": "官方辟谣并说明时间线。",
+            }
+        ]
+
+    monkeypatch.setattr("app.services.web_retrieval._search_ddgs", fake_search_ddgs, raising=False)
+
+    rows = search_web_evidence("网传某地发布紧急封控通知")
+
+    assert len(rows) == 1
+    assert rows[0].source == "news.cctv.com"
+    assert rows[0].title == "央视新闻：辟谣通报"

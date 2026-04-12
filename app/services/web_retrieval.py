@@ -45,6 +45,8 @@ def search_web_evidence(claim_text: str, top_k: int = 3) -> list[WebEvidenceCand
             raw_items = _search_searxng(claim_text, top_k=top_k, timeout_sec=timeout_sec)
         elif provider == "bocha":
             raw_items = _search_bocha(claim_text, top_k=top_k, timeout_sec=timeout_sec)
+        elif provider == "ddgs":
+            raw_items = _search_ddgs(claim_text, top_k=top_k, timeout_sec=timeout_sec)
         else:
             raw_items = _search_baidu_api(claim_text, top_k=top_k, timeout_sec=timeout_sec)
     except Exception as exc:  # noqa: BLE001
@@ -368,6 +370,102 @@ def _search_searxng(claim_text: str, top_k: int, timeout_sec: float) -> list[dic
     return normalized
 
 
+def _search_ddgs(claim_text: str, top_k: int, timeout_sec: float) -> list[dict[str, Any]]:
+    try:
+        from ddgs import DDGS
+    except ImportError as exc:
+        logger.warning("DDGS provider 未安装，跳过联网检索: %s", exc)
+        return []
+
+    mode = os.getenv("TRUTHCAST_DDGS_MODE", "text").strip().lower() or "text"
+    backend = os.getenv("TRUTHCAST_DDGS_BACKEND", "auto").strip() or "auto"
+    region = os.getenv("TRUTHCAST_DDGS_REGION", "cn-zh").strip() or "cn-zh"
+    safesearch = os.getenv("TRUTHCAST_DDGS_SAFESEARCH", "moderate").strip() or "moderate"
+    timelimit = os.getenv("TRUTHCAST_DDGS_TIMELIMIT", "y").strip() or "y"
+
+    request_body = {
+        "query": claim_text,
+        "mode": mode,
+        "backend": backend,
+        "region": region,
+        "safesearch": safesearch,
+        "timelimit": timelimit,
+        "max_results": max(1, top_k),
+    }
+    _record_web_trace(
+        stage="request",
+        method="DDGS",
+        url=f"ddgs://{mode}",
+        request_headers={},
+        request_body=request_body,
+    )
+
+    try:
+        client = DDGS(timeout=max(1, int(timeout_sec)))
+        if mode == "news":
+            results = client.news(
+                claim_text,
+                region=region,
+                safesearch=safesearch,
+                timelimit=timelimit or None,
+                max_results=max(1, top_k),
+                page=1,
+                backend=backend,
+            )
+        else:
+            results = client.text(
+                claim_text,
+                region=region,
+                safesearch=safesearch,
+                timelimit=timelimit or None,
+                max_results=max(1, top_k),
+                page=1,
+                backend=backend,
+            )
+    except Exception as exc:  # noqa: BLE001
+        _record_web_trace(
+            stage="error",
+            method="DDGS",
+            url=f"ddgs://{mode}",
+            request_headers={},
+            request_body=request_body,
+            error=str(exc),
+        )
+        raise RuntimeError(f"DDGS 检索失败: {exc}") from exc
+
+    if not isinstance(results, list):
+        results = []
+
+    normalized: list[dict[str, Any]] = []
+    for item in results[:top_k]:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title", "")
+        url = item.get("href") or item.get("url", "")
+        summary = item.get("body") or item.get("snippet", "")
+        published_at = item.get("date") or item.get("published", "")
+        normalized.append(
+            {
+                "title": title,
+                "url": url,
+                "summary": summary,
+                "score": _ddgs_score(mode=mode, source=item.get("source", "")),
+                "published_at": published_at,
+                "raw_snippet": summary,
+            }
+        )
+
+    _record_web_trace(
+        stage="response",
+        method="DDGS",
+        url=f"ddgs://{mode}",
+        request_headers={},
+        request_body=request_body,
+        response_body={"results": normalized},
+    )
+    return normalized
+
+
 def _post_json(
     url: str,
     payload: dict[str, Any],
@@ -519,6 +617,21 @@ def _safe_headers(headers: dict[str, str]) -> dict[str, str]:
         else:
             masked[key] = value
     return masked
+
+
+def _ddgs_score(mode: str, source: Any) -> float:
+    source_name = str(source or "").lower()
+    if "wikipedia" in source_name:
+        return 0.58
+    if "bing" in source_name:
+        return 0.5
+    if "yahoo" in source_name:
+        return 0.46
+    if "duckduckgo" in source_name:
+        return 0.45
+    if mode == "news":
+        return 0.48
+    return 0.42
 
 
 def _record_web_trace(

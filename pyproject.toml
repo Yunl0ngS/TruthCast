@@ -14,6 +14,7 @@ dependencies = [
   "pydantic>=2.8.0",
   "PyYAML>=6.0.2",
   "beautifulsoup4>=4.12.0",
+  "ddgs>=9.13.0",
   "htmldate>=1.9.0",
   "python-multipart>=0.0.9",
   "json-repair",
