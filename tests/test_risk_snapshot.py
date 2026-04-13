@@ -109,3 +109,26 @@ def test_risk_snapshot_force_bypasses_news_gate(monkeypatch) -> None:
     assert result.strategy is not None
     assert result.strategy.is_news is False
     assert result.label == "suspicious"
+
+
+def test_risk_snapshot_prompts_include_absolute_date_and_timezone(monkeypatch) -> None:
+    monkeypatch.setenv("TRUTHCAST_REPORT_TZ", "Asia/Hong_Kong")
+
+    class _FakeDatetime:
+        @classmethod
+        def now(cls, tz=None):
+            class _FakeNow:
+                def strftime(self, fmt: str) -> str:
+                    _ = fmt
+                    return "2026-04-13"
+
+            return _FakeNow()
+
+    monkeypatch.setattr(risk_snapshot, "datetime", _FakeDatetime)
+
+    system_prompt, user_prompt = risk_snapshot._build_risk_llm_prompts()
+
+    assert "当前日期为 2026-04-13" in user_prompt
+    assert "当前时区为 Asia/Hong_Kong" in user_prompt
+    assert "不要过度使用时间因素" in user_prompt
+    assert "时间信息仅用于辅助理解语境" in system_prompt

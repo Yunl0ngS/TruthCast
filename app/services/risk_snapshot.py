@@ -4,6 +4,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any
 from urllib import error, request
+from zoneinfo import ZoneInfo
 
 from app.core.logger import get_logger
 from app.services.text_complexity import (
@@ -171,6 +172,36 @@ def _risk_llm_enabled() -> bool:
     return os.getenv("TRUTHCAST_LLM_ENABLED", "false").strip().lower() == "true"
 
 
+def _build_risk_llm_prompts() -> tuple[str, str]:
+    current_tz = os.getenv("TRUTHCAST_REPORT_TZ", "Asia/Hong_Kong").strip() or "Asia/Hong_Kong"
+    try:
+        current_date = datetime.now(ZoneInfo(current_tz)).strftime("%Y-%m-%d")
+    except Exception:  # noqa: BLE001
+        current_tz = "Asia/Hong_Kong"
+        current_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    system_prompt = (
+        "你是严谨的风险评估助手。你的核心任务是判断文本的信息风险，并只返回JSON。"
+        "时间信息仅用于辅助理解语境，不是唯一或首要判定依据。"
+        "若判断明显依赖时间背景但信息不足，可优先考虑“需要补充语境”。"
+        "不要仅因出现旧年份、历史事件或时间表达不完整，就直接判定为“不实信息”。"
+    )
+
+    user_prompt = (
+        "你是风险快照判定器。请根据输入文本输出严格JSON："
+        '{"label":"可信|可疑|高风险|需要补充语境|疑似不实信息",'
+        '"score":0-100,"confidence":0-1,"reasons":["中文理由1","中文理由2"]}。'
+        "其中 score 表示风险程度，越高表示风险越大（0=完全可信，100=极高风险）。"
+        "label 与 score 对应关系：可信(0-30)、需要补充语境/可疑(31-60)、高风险/疑似不实信息(61-100)。"
+        f"补充语境：当前日期为 {current_date}，当前时区为 {current_tz}。"
+        "如果文本中出现“今天、昨天、明天、近日、今年、去年、刚刚”等相对时间，请以上述时间锚点理解；"
+        "除非判断明显依赖时间背景，否则不要过度使用时间因素。"
+        "若文本依赖时间背景但信息不足，优先考虑“需要补充语境”。"
+        "不要输出任何额外说明。"
+    )
+    return system_prompt, user_prompt
+
+
 def _detect_with_llm(text: str) -> ScoreResult | None:
     api_key = os.getenv("TRUTHCAST_LLM_API_KEY", "").strip()
     if not api_key:
@@ -183,22 +214,15 @@ def _detect_with_llm(text: str) -> ScoreResult | None:
         os.getenv("TRUTHCAST_LLM_MODEL", "gpt-4o-mini"),
     ).strip()
     endpoint = base_url.rstrip("/") + "/chat/completions"
-    prompt = (
-        "你是风险快照判定器。请根据输入文本输出严格JSON："
-        '{"label":"可信|可疑|高风险|需要补充语境|疑似不实信息",'
-        '"score":0-100,"confidence":0-1,"reasons":["中文理由1","中文理由2"]}。'
-        "其中 score 表示风险程度，越高表示风险越大（0=完全可信，100=极高风险）。"
-        "label 与 score 对应关系：可信(0-30)、需要补充语境/可疑(31-60)、高风险/疑似不实信息(61-100)。"
-        "不要输出任何额外说明。"
-    )
+    system_prompt, user_prompt = _build_risk_llm_prompts()
 
     payload = {
         "model": model,
         "temperature": 0,
         "response_format": {"type": "json_object"},
         "messages": [
-            {"role": "system", "content": "你是严谨的风险评估助手，只返回JSON。"},
-            {"role": "user", "content": f"{prompt}\n\n待分析文本：\n{text}"},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"{user_prompt}\n\n待分析文本：\n{text}"},
         ],
     }
 
