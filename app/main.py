@@ -17,6 +17,7 @@ from app.api.routes_history import router as history_router
 from app.api.routes_multimodal import router as multimodal_router
 from app.api.routes_monitor import router as monitor_router
 from app.api.routes_simulate import router as simulate_router
+from app.api.routes_simulation import router as simulation_router
 from app.api.routes_pipeline_state import router as pipeline_router
 from app.core.auth import require_api_key
 from app.core.concurrency import init_semaphore
@@ -87,6 +88,7 @@ app.include_router(health_router)
 app.include_router(detect_router)
 app.include_router(chat_router)
 app.include_router(simulate_router)
+app.include_router(simulation_router)
 app.include_router(pipeline_router)
 app.include_router(history_router)
 app.include_router(content_router)
