@@ -22,6 +22,9 @@ class SimulationStartRequest(BaseModel):
     platforms: list[Platform] = Field(default_factory=lambda: [Platform.WEIBO])
     duration: str = "72h"
 
+    # 随机种子（用于可复现模拟）
+    seed: Optional[int] = None
+
     # 名称
     name: str = ""
     description: str = ""

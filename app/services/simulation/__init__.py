@@ -19,6 +19,15 @@ from app.services.simulation.platform_simulator import (
     PlatformAdapter, WeiboAdapter, XiaohongshuAdapter, DouyinAdapter, BilibiliAdapter,
     PlatformState, PLATFORM_ADAPTERS
 )
+from app.services.simulation.timeline import (
+    Timeline, SimulationTick, TimelineEvent, SimulationTimeUnit
+)
+from app.services.simulation.report_generator import (
+    ReportGenerator, StanceSnapshot, ViralContent
+)
+from app.services.simulation.simulation_engine import (
+    SimulationEngine, SimulationProgress, run_simulation
+)
 
 __all__ = [
     # Config
@@ -71,4 +80,20 @@ __all__ = [
     "BilibiliAdapter",
     "PlatformState",
     "PLATFORM_ADAPTERS",
+
+    # Timeline
+    "Timeline",
+    "SimulationTick",
+    "TimelineEvent",
+    "SimulationTimeUnit",
+
+    # Report Generator
+    "ReportGenerator",
+    "StanceSnapshot",
+    "ViralContent",
+
+    # Simulation Engine
+    "SimulationEngine",
+    "SimulationProgress",
+    "run_simulation",
 ]
